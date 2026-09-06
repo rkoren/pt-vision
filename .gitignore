@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project outputs (patient video or derived data)
+ptv_out/
+ptvision-data/
+*.mov
+*.MOV
+*.mp4
+!tests/fixtures/*.mp4
+*.onnx
+*.zip
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Claude stuff
+decisions

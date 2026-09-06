@@ -1,0 +1,110 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ptvision"
+version = "0.1.0"
+description = "Open computer-vision measurement tools to assist physical therapists. Not a medical device."
+readme = "README.md"
+license = "Unlicense"
+license-files = ["LICENSE", "NOTICE", "src/ptvision/_vendor/pose2sim/LICENSE"]
+requires-python = ">=3.12,<3.14"
+authors = [{ name = "Reilly Koren" }]
+keywords = ["physical-therapy", "pose-estimation", "biomechanics", "gait", "rehabilitation"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Healthcare Industry",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+]
+dependencies = [
+  "rtmlib==0.0.16",
+  "onnxruntime>=1.29,<2",
+  "numpy>=2.2,<3",
+  "scipy>=1.15,<2",
+  "pandas>=2.3,<4",
+  "pyarrow>=21,<26",
+  "pydantic>=2.11,<3",
+  "typer>=0.16,<1",
+  "jinja2>=3.1,<4",
+  "matplotlib>=3.10,<4",
+  "platformdirs>=4.3,<5",
+  "tomli-w>=1.2,<2",
+  "certifi>=2025.1",
+  "opencv-python>=5,<6",
+]
+
+[project.optional-dependencies]
+mediapipe = ["mediapipe>=1.0.1,<2"]
+# OpenSim inverse kinematics via Pose2Sim. Heavy: pulls opensim, PySide6, openvino, caliscope.
+opensim = ["opensim>=4.6,<5", "pose2sim==0.10.49"]
+app = [
+    "pyqtgraph>=0.14,<0.15",
+    "pyside6-essentials>=6.11.2,<7",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4",
+  "pytest-cov>=6",
+  "ruff>=0.12",
+  "mypy>=1.17",
+  "pre-commit>=4.2",
+  "syrupy>=4.9",
+  "pandas-stubs",
+  "types-PyYAML",
+]
+qt = [
+    "pytest-qt>=4.4,<5",
+]
+
+[project.scripts]
+ptv = "ptvision.cli.main:app"
+
+[project.urls]
+Repository = "https://github.com/rkoren/pt-vision"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ptvision"]
+
+[tool.uv]
+# rtmlib declares both opencv-python and opencv-contrib-python, which install the same `cv2`
+# package on top of each other. rtmlib only uses core cv2 calls, so drop the contrib wheel.
+override-dependencies = ["opencv-contrib-python ; sys_platform == 'never'"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["src/ptvision/_vendor", "experiments"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "NPY", "PD", "RUF", "SIM", "PTH"]
+ignore = ["RUF012", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011", "PD", "E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "model: requires downloaded ONNX weights (run `ptv models pull` first)",
+  "slow: slow test",
+  "qt: needs PySide6 and pytest-qt (uv sync --extra app --group qt)",
+]
+addopts = "-ra --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning:rtmlib.*"]
+
+[tool.mypy]
+python_version = "3.12"
+exclude = ["src/ptvision/_vendor", "experiments"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["ptvision.clinical.*", "ptvision.data.*"]
+strict = true

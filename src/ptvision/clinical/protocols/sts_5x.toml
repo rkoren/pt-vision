@@ -1,0 +1,95 @@
+[protocol]
+id = "sts_5x"
+version = "0.1.0"
+name = "Five Times Sit-to-Stand (5xSTS)"
+family = "sit_to_stand"
+summary = "Time to complete five consecutive sit-to-stand repetitions as quickly as safely possible, arms crossed."
+
+[capture]
+view = "sagittal"
+distance_m = 3.0
+camera_height_m = 0.8
+min_fps = 24
+duration_s = [4, 180]
+required_keypoints = ["LHip", "RHip", "LKnee", "RKnee", "LAnkle", "RAnkle", "LShoulder", "RShoulder", "Neck", "Hip"]
+instructions = """Phone landscape on a tripod about 0.8 m high and 3 m from the chair, perpendicular to the
+person's side. Whole body, feet and chair seat in frame. Standard armless chair (seat 43-45 cm).
+Arms crossed over the chest. Start seated, stand fully and sit back down five times as fast as is safe."""
+
+[pose]
+backend = "rtmlib"
+model = "body_with_feet"
+
+[preprocess]
+score_threshold = 0.3
+interp_max_gap_s = 0.3
+filter_type = "butterworth"
+filter_order = 4
+filter_cutoff_hz = 6.0
+segment_signal_cutoff_hz = 3.0
+
+[segmenter]
+name = "sts_velocity_threshold"
+version = "0.1.0"
+n_reps_expected = 5
+start_rule = "first_seat_off"      # first_seat_off | lean_onset | manual
+end_rule = "fifth_stand"           # fifth_stand | fifth_sit
+v_seated = 0.25                    # normalized rise-heights per second
+v_standing = 0.25
+peak_height_min = 0.7
+peak_prominence_min = 0.5
+min_rep_s = 0.6
+lean_velocity_deg_s = 10.0
+
+[[metrics]]
+name = "sts_total_time"
+primary = true
+norm = "sts_5x_bohannon2006"
+
+[[metrics]]
+name = "sts_rep_count"
+
+[[metrics]]
+name = "sts_rise_time"
+
+[[metrics]]
+name = "sts_sit_time"
+
+[[metrics]]
+name = "sts_cycle_time"
+
+[[metrics]]
+name = "trunk_lean_at_seat_off"
+
+[[metrics]]
+name = "peak_trunk_lean_rising"
+
+[[metrics]]
+name = "knee_flexion_at_seat_off"
+
+# Angle bands used to colour the skeleton (1 = in range, 0.5 = at the warn edge, 0 = beyond).
+# Provisional values from healthy sit-to-stand descriptions; confirm with the PT partner (backlog B02).
+[[rules]]
+angle = "trunk_lean"
+label = "Trunk forward lean"
+ok = [0, 40]
+warn = [-10, 55]
+note = "provisional, confirm with PT"
+
+[[rules]]
+angle = "knee_flexion"
+label = "Knee flexion"
+ok = [0, 110]
+warn = [0, 130]
+note = "provisional, confirm with PT"
+
+[[rules]]
+angle = "hip_flexion"
+label = "Hip flexion"
+ok = [0, 120]
+warn = [0, 140]
+note = "provisional, confirm with PT"
+
+[report]
+template = "sts.html.j2"
+angles = ["knee_flexion", "hip_flexion", "trunk_lean"]

@@ -1,0 +1,62 @@
+# ONNX weight manifest. URLs are the ones rtmlib 0.0.16 uses for BodyWithFeet (Halpe-26).
+# sha256 values are of the downloaded archive; empty means "not yet pinned" (filled by `ptv models pull`).
+# All weights: MMPose project, Apache-2.0 (https://github.com/open-mmlab/mmpose).
+# Training-data note: Halpe-26 checkpoints are trained on the "body7" dataset mix, which includes the
+# Halpe dataset (no license file upstream). Documented as a residual risk in docs/decisions/0002.
+
+[models.yolox_tiny]
+kind = "det"
+url = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_tiny_8xb8-300e_humanart-6f3252f9.zip"
+input_size = [416, 416]
+sha256 = "36e09ca555916253fa1b5d51bec01e48e98e1f0af966c51ce3e844d8c8fc4cfc"
+license = "Apache-2.0"
+
+[models.yolox_m]
+kind = "det"
+url = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_m_8xb8-300e_humanart-c2c7a14a.zip"
+input_size = [640, 640]
+sha256 = "a000224fd8ba283202bc62d4a5fcdfe353adb9f468777dbac1ea2ada2093adde"
+license = "Apache-2.0"
+
+[models.yolox_x]
+kind = "det"
+url = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_x_8xb8-300e_humanart-a39d44ed.zip"
+input_size = [640, 640]
+sha256 = ""
+license = "Apache-2.0"
+
+[models.rtmpose_s_halpe26]
+kind = "pose"
+url = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-s_simcc-body7_pt-body7-halpe26_700e-256x192-7f134165_20230605.zip"
+input_size = [192, 256]
+layout = "halpe26"
+sha256 = "0b3d2545ab048c403c3824af8320f0842c52570f5bc1b6745087749f4fef3a28"
+license = "Apache-2.0"
+
+[models.rtmpose_m_halpe26]
+kind = "pose"
+url = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7-halpe26_700e-256x192-4d3e73dd_20230605.zip"
+input_size = [192, 256]
+layout = "halpe26"
+sha256 = "55b81170e236040b59fc792ad0a8315301ac4c079a3bdb1095d838aad3088d18"
+license = "Apache-2.0"
+
+[models.rtmpose_x_halpe26]
+kind = "pose"
+url = "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-x_simcc-body7_pt-body7-halpe26_700e-384x288-7fb6e239_20230606.zip"
+input_size = [288, 384]
+layout = "halpe26"
+sha256 = ""
+license = "Apache-2.0"
+
+[modes.lightweight]
+det = "yolox_tiny"
+pose = "rtmpose_s_halpe26"
+
+[modes.balanced]
+det = "yolox_m"
+pose = "rtmpose_m_halpe26"
+
+[modes.performance]
+det = "yolox_x"
+pose = "rtmpose_x_halpe26"

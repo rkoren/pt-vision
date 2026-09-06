@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: System deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libgl1 libglib2.0-0 libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - name: System deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - run: uv sync --frozen --group dev --group qt --extra app
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv run pytest -m "not model"
+
+  model-tests:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: System deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libgl1 libglib2.0-0
+      - name: System deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - run: uv sync --frozen --group dev
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ptvision/models
+          key: ptv-models-${{ hashFiles('src/ptvision/pose/models.toml') }}
+      - run: uv run ptv models pull --mode lightweight
+      - run: uv run pytest -m model
+
+  opensim-parity:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libgl1 libglib2.0-0 libegl1 libxkbcommon0
+      - run: uv sync --frozen --group dev --extra opensim
+      - run: uv run pytest tests/integration/test_pose2sim_parity.py

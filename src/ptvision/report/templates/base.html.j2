@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ b.title }} — {{ b.trial_id }}</title>
+<style>
+  :root { --ink:#1b1f23; --muted:#5f6b7a; --line:#e3e7eb; --pass:#2e7d32; --warn:#b26a00; --fail:#c62828; --accent:#1f4e79; }
+  body { font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); margin: 0; background: #fafbfc; }
+  main { max-width: 980px; margin: 0 auto; padding: 28px 24px 60px; }
+  h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 28px 0 10px; color: var(--accent); }
+  .meta { color: var(--muted); font-size: 13px; }
+  .banner { border-left: 6px solid; padding: 10px 14px; margin: 18px 0; background: #fff; border-radius: 4px; }
+  .banner.pass { border-color: var(--pass); } .banner.warn { border-color: var(--warn); } .banner.fail { border-color: var(--fail); }
+  .status { font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: .04em; }
+  .status.pass { color: var(--pass); } .status.warn { color: var(--warn); } .status.fail { color: var(--fail); }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; }
+  .primary .value { font-size: 40px; font-weight: 700; line-height: 1.1; }
+  .primary .label { color: var(--muted); }
+  .tier { display:inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; background:#eef2f6; color: var(--muted); margin-left: 6px; }
+  table { border-collapse: collapse; width: 100%; background:#fff; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  figure { margin: 14px 0; } figure img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background:#fff; }
+  figcaption { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .thumbs { display: flex; gap: 10px; flex-wrap: wrap; } .thumbs img { width: 180px; border-radius: 4px; border: 1px solid var(--line); }
+  .disclaimer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; margin-top: 30px; }
+  details summary { cursor: pointer; color: var(--accent); }
+  ul.compact li { margin: 2px 0; } code { font-size: 12.5px; background:#f1f3f5; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{ b.title }}</h1>
+  <div class="meta">
+    {{ b.protocol.name }} (protocol <code>{{ b.protocol.id }}</code> v{{ b.protocol.version }}) ·
+    trial <code>{{ b.trial_id }}</code> · run <code>{{ b.run_id }}</code> · {{ b.created_at }} · ptvision {{ b.ptvision_version }}
+  </div>
+
+  <div class="banner {{ b.quality.status }}">
+    <span class="status {{ b.quality.status }}">capture quality: {{ b.quality.status }}</span>
+    {% set bad = b.quality.checks | selectattr("status", "ne", "pass") | list %}
+    {% if bad %}
+      <ul class="compact">
+      {% for c in bad %}<li><b>{{ c.name }}</b> ({{ c.status }}): {{ c.message }}</li>{% endfor %}
+      </ul>
+    {% else %}
+      <div>All capture checks passed.</div>
+    {% endif %}
+  </div>
+
+  {% block body %}{% endblock %}
+
+  <h2>How this was computed</h2>
+  <div class="card">
+    <ul class="compact">{% for m in b.methods %}<li>{{ m }}</li>{% endfor %}</ul>
+    {% if b.angle_definitions %}
+    <details><summary>Angle definitions</summary>
+      <ul class="compact">{% for a in b.angle_definitions %}<li><b>{{ a.name }}</b>: {{ a.description }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+    <details><summary>Provenance</summary>
+      <pre style="font-size:12px; white-space:pre-wrap">{{ b.provenance | tojson(indent=2) }}</pre>
+    </details>
+  </div>
+
+  <p class="disclaimer">{{ b.disclaimer }}</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Normative reference tables. Each CSV has columns: age_lo, age_hi, sex (f|m|all), statistic, value, units, n
+# statistic: "mean" (reference mean for the stratum), "cutoff" (threshold), "sd".
+
+[norms.sts_5x_bohannon2006]
+metric = "sts_total_time"
+file = "sts_5x_bohannon2006.csv"
+population = "community-dwelling adults, meta-analysis of 14 studies"
+direction = "higher_is_worse"
+citation = "Bohannon RW. Reference values for the five-repetition sit-to-stand test: a descriptive meta-analysis of data from elders. Percept Mot Skills. 2006;103(1):215-222."
+note = "Times above the age-group mean are slower than average for that age group. Not a diagnostic threshold."

@@ -1,0 +1,54 @@
+{% extends "base.html.j2" %}
+{% block body %}
+  {% if b.primary %}
+  <div class="card primary" style="margin-top:18px">
+    <div class="label">{{ b.primary.label }} <span class="tier">tier {{ b.primary.tier }}</span></div>
+    <div class="value">{{ b.primary.formatted() }}</div>
+    {% if b.primary.note %}<div class="meta">{{ b.primary.note }}</div>{% endif %}
+    {% if b.primary_norm %}
+      <p style="margin:10px 0 0">{{ b.primary_norm.statement }}<br>
+      <span class="meta">Reference: {{ b.primary_norm.citation }}</span></p>
+    {% endif %}
+    {% if b.primary.flags %}<p class="meta">Notes: {{ b.primary.flags | join("; ") }}</p>{% endif %}
+  </div>
+  {% endif %}
+
+  <h2>Measurements</h2>
+  <table>
+    <tr><th>measure</th><th>value</th><th>error</th><th>n</th><th>tier</th><th>per repetition</th></tr>
+    {% for m in b.metrics %}
+    <tr>
+      <td>{{ m.label }}{% if m.side %} <span class="meta">({{ m.side }})</span>{% endif %}</td>
+      <td class="num">{{ m.formatted() }}</td>
+      <td class="meta">{% if m.error is not none %}{{ m.error_kind }}{% endif %}</td>
+      <td class="num">{{ m.n_events if m.n_events is not none else "" }}</td>
+      <td><span class="tier">{{ m.tier }}</span></td>
+      <td class="meta">{% if m.per_event %}{{ m.per_event | join(", ") }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  {% for f in b.figures %}
+  <figure><img src="{{ f.path }}" alt="{{ f.name }}"><figcaption>{{ f.caption }}</figcaption></figure>
+  {% endfor %}
+
+  {% if b.thumbnails %}
+  <h2>Seat-off frames</h2>
+  <div class="thumbs">{% for t in b.thumbnails %}<img src="{{ t.path }}" title="{{ t.caption }}" alt="{{ t.name }}">{% endfor %}</div>
+  {% endif %}
+
+  {% if b.events.reps %}
+  <h2>Events (frame numbers at {{ "%.2f" | format(b.events.fps) }} fps)</h2>
+  <table>
+    <tr><th>rep</th><th>lean onset</th><th>seat-off</th><th>stand</th><th>descent start</th><th>seated</th></tr>
+    {% for r in b.events.reps %}
+    <tr><td>{{ r.index + 1 }}</td><td class="num">{{ r.lean_onset if r.lean_onset is not none else "" }}</td><td class="num">{{ r.seat_off }}</td><td class="num">{{ r.stand_reached }}</td><td class="num">{{ r.descent_start if r.descent_start is not none else "" }}</td><td class="num">{{ r.seated_return if r.seated_return is not none else "" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if b.warnings %}
+  <h2>Warnings</h2>
+  <ul class="compact">{% for w in b.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% endif %}
+{% endblock %}
