@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -11,13 +12,18 @@ concurrency:
 
 env:
   QT_QPA_PLATFORM: offscreen
+  PTV_MODEL_DIR: ${{ github.workspace }}/.ptv-models
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +36,11 @@ jobs:
       - name: System deps (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - name: System deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
       - run: uv sync --frozen --group dev --group qt --extra app
+      - run: uv run ptv version
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy src
@@ -41,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -54,11 +64,14 @@ jobs:
       - name: System deps (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - name: System deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
       - run: uv sync --frozen --group dev
       - name: Cache model weights
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ptvision/models
+          path: ${{ env.PTV_MODEL_DIR }}
           key: ptv-models-${{ hashFiles('src/ptvision/pose/models.toml') }}
       - run: uv run ptv models pull --mode lightweight
       - run: uv run pytest -m model

@@ -21,18 +21,6 @@ Pick-up check: …
 
 _(nothing in progress)_
 
-## Recurring milestone checks
-
-### B49 Windows fresh-install check (recurring)
-Infra · Added 2026-09-03 · Effort S per run · Depends on: access to the Windows machine
-Why: CI catches code regressions; only a real install shows what a PT experiences (prerequisites,
-first-run download, display, drag-drop, playback speed, later SmartScreen).
-What: run the checklist in `docs/portability/windows-log.md` and fill its log at each milestone listed
-there (M1 baseline now; M2 after the ffmpeg decision; M3 after Slice 2; M4 before the first PT hands-on;
-M5 at each distribution route; and after any dependency bump or change in `io/video.py`,
-`pose/models.py`, `app/`). Turn every friction point into a backlog entry.
-Next due: **M1 baseline** on the current state.
-
 ## Next (ordered)
 
 ### B02 Angle-band rules in protocol TOML
@@ -99,14 +87,6 @@ Why: PTs read angles off the joint, not off a plot (Sports2D-style overlays).
 What: draw an arc and value at knee/hip/trunk on the near side in `viz/skeleton.py` for both the CLI overlay
 and the app; toggle in the panel.
 Pick-up check: keep text legible on Retina and in the H.264 overlay export.
-
-### B44 Windows CI job
-Infra · Added 2026-09-03 · Effort S
-Why: PTs will run this on Windows laptops as well as Macs; regressions in paths, ffmpeg invocation, Qt, or
-OpenCV backends should surface in CI, not at a clinic.
-What: add `windows-latest` to the test matrix (ffmpeg via winget/choco, `uv sync --extra app --group qt`,
-`QT_QPA_PLATFORM=offscreen`), including the model-test job with cached weights.
-Pick-up check: confirm PySide6/onnxruntime/opencv still publish win_amd64 wheels for the pinned versions.
 
 ### B09 Longitudinal comparison with MDC
 Clinical · Added 2026-09-01 · Effort M · Depends on: B03 (measurement error), data store
@@ -324,6 +304,15 @@ What: decide between keeping the Unlicense, 0BSD, or Apache-2.0 (patent grant, c
 update LICENSE, pyproject, NOTICE, README, CLAUDE.md, and add a CONTRIBUTING note.
 Pick-up check: has anything been published or contributed since ADR-0009?
 
+### B51 Pose2Sim parity test is referenced by CI but does not exist
+Infra · Added 2026-09-06 · Effort S · Depends on: `opensim` extra installable in CI
+Why: `.github/workflows/ci.yml` has a manual `opensim-parity` job running
+`tests/integration/test_pose2sim_parity.py`, planned in ADR-0002 (compare our angles with
+`Pose2Sim.common.points_to_angles` on a fixture) but never written. The job would fail if dispatched.
+What: write the parity test (skip when Pose2Sim is not importable), confirm the `opensim` extra resolves
+on ubuntu-24.04, run the job once by hand.
+Pick-up check: Pose2Sim version pinned in pyproject still matches the vendored PROVENANCE commit.
+
 ### B40 Recent-trials list on the drop page
 UI · Added 2026-09-02 · Effort S
 What: QSettings-backed list of recently opened trials.
@@ -336,6 +325,9 @@ What: QSettings-backed list of recently opened trials.
 
 ## Done
 
+- 2026-09-06 B44 Windows CI: `windows-latest` in both matrices, ffmpeg via Chocolatey, bash for every step,
+  portable model cache (`PTV_MODEL_DIR`), `.gitattributes` enforcing LF, `workflow_dispatch` trigger.
+  First green run on the `ci-windows` PR. Surfaced B51 (parity test referenced by CI but missing).
 - 2026-09-03 B01 Desktop viewer app (`ptv app`): drop → progress with cancel → overlay playback with
   rule/confidence colouring, scrubbing, synced timeline, metrics panel; shared `viz/status` gradient
   also drives CLI overlays; angle side persisted; 15-frame GOP ingest; Qt tests offscreen in CI.

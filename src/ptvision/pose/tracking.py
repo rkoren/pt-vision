@@ -1,7 +1,7 @@
 """Frame-to-frame person association and primary-subject selection.
 
 Association uses Pose2Sim's `sort_people_sports2d` (Hungarian matching on mean per-keypoint
-distance, with a grace period for short dropouts). Selection of the subject is the person 
+distance, with a grace period for short dropouts). Selection of the subject is the person
 present most often with the largest median bounding box. CLI `--person` flag overrides it.
 """
 
