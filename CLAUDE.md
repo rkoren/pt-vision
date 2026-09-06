@@ -37,6 +37,18 @@ uv run ptv app [clip.mov | trial_dir]           # desktop viewer
   synthetic generators (`tests/synthetic.py`).
 - Commit only when asked. Comment large code changes or new files with "[REVIEW]" and avoid committing with that tag present
 
+## Branch workflow
+
+Major changes happen on branches the user creates; Claude never creates branches, commits, or pushes.
+1. Agree on the next major change (usually a backlog item, after its pick-up assessment).
+2. The user creates the working branch and says so.
+3. Claude drafts the change as the contents of a first commit and tests it (new files and large
+   changes carry a `[REVIEW]` comment for the user to inspect).
+4. The user reviews, removes `[REVIEW]` tags, commits, and opens a PR; follow-up fixes are drafted the
+   same way on the same branch.
+5. The user merges, `main` is pulled, and the loop repeats. Small doc-only edits may still go to `main`
+   at the user's discretion.
+
 ## Backlog practice
 
 `BACKLOG.md` at the repo root is the single list of things we are not doing right now.
