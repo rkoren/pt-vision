@@ -19,31 +19,7 @@ Pick-up check: …
 
 ## Now
 
-### B44 Windows CI job
-Infra · Added 2026-09-03 · Effort S
-Why: PTs will run this on Windows laptops as well as Macs; regressions in paths, ffmpeg invocation, Qt, or
-OpenCV backends should surface in CI, not at a clinic.
-What: add `windows-latest` to the test matrix (ffmpeg via winget/choco, `uv sync --extra app --group qt`,
-`QT_QPA_PLATFORM=offscreen`), including the model-test job with cached weights.
-Pick-up check: confirm PySide6/onnxruntime/opencv still publish win_amd64 wheels for the pinned versions.
-Pick-up check (2026-09-06): still right (portability decided 2026-09-03). Verified PySide6-Essentials 6.11.2,
-onnxruntime 1.29.0, opencv-python 5.0.0.93, pyqtgraph 0.14.0 and pytest-qt all publish Windows wheels and
-the universal `uv.lock` already contains them. Two gaps found and folded in: the model cache path in CI
-was Unix-only (`~/.cache`), and no `.gitattributes` enforced LF so `ruff format --check` could fail on a
-CRLF checkout. Branch: `ci-windows`.
-
-
-## Recurring milestone checks
-
-### B49 Windows fresh-install check (recurring)
-Infra · Added 2026-09-03 · Effort S per run · Depends on: access to the Windows machine
-Why: CI catches code regressions; only a real install shows what a PT experiences (prerequisites,
-first-run download, display, drag-drop, playback speed, later SmartScreen).
-What: run the checklist in `docs/portability/windows-log.md` and fill its log at each milestone listed
-there (M1 baseline now; M2 after the ffmpeg decision; M3 after Slice 2; M4 before the first PT hands-on;
-M5 at each distribution route; and after any dependency bump or change in `io/video.py`,
-`pose/models.py`, `app/`). Turn every friction point into a backlog entry.
-Next due: **M1 baseline** on the current state.
+_(nothing in progress)_
 
 ## Next (ordered)
 
@@ -349,6 +325,9 @@ What: QSettings-backed list of recently opened trials.
 
 ## Done
 
+- 2026-09-06 B44 Windows CI: `windows-latest` in both matrices, ffmpeg via Chocolatey, bash for every step,
+  portable model cache (`PTV_MODEL_DIR`), `.gitattributes` enforcing LF, `workflow_dispatch` trigger.
+  First green run on the `ci-windows` PR. Surfaced B51 (parity test referenced by CI but missing).
 - 2026-09-03 B01 Desktop viewer app (`ptv app`): drop → progress with cancel → overlay playback with
   rule/confidence colouring, scrubbing, synced timeline, metrics panel; shared `viz/status` gradient
   also drives CLI overlays; angle side persisted; 15-frame GOP ingest; Qt tests offscreen in CI.
