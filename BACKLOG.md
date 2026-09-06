@@ -19,7 +19,19 @@ Pick-up check: …
 
 ## Now
 
-_(nothing in progress)_
+### B44 Windows CI job
+Infra · Added 2026-09-03 · Effort S
+Why: PTs will run this on Windows laptops as well as Macs; regressions in paths, ffmpeg invocation, Qt, or
+OpenCV backends should surface in CI, not at a clinic.
+What: add `windows-latest` to the test matrix (ffmpeg via winget/choco, `uv sync --extra app --group qt`,
+`QT_QPA_PLATFORM=offscreen`), including the model-test job with cached weights.
+Pick-up check: confirm PySide6/onnxruntime/opencv still publish win_amd64 wheels for the pinned versions.
+Pick-up check (2026-09-06): still right (portability decided 2026-09-03). Verified PySide6-Essentials 6.11.2,
+onnxruntime 1.29.0, opencv-python 5.0.0.93, pyqtgraph 0.14.0 and pytest-qt all publish Windows wheels and
+the universal `uv.lock` already contains them. Two gaps found and folded in: the model cache path in CI
+was Unix-only (`~/.cache`), and no `.gitattributes` enforced LF so `ruff format --check` could fail on a
+CRLF checkout. Branch: `ci-windows`.
+
 
 ## Recurring milestone checks
 
@@ -99,14 +111,6 @@ Why: PTs read angles off the joint, not off a plot (Sports2D-style overlays).
 What: draw an arc and value at knee/hip/trunk on the near side in `viz/skeleton.py` for both the CLI overlay
 and the app; toggle in the panel.
 Pick-up check: keep text legible on Retina and in the H.264 overlay export.
-
-### B44 Windows CI job
-Infra · Added 2026-09-03 · Effort S
-Why: PTs will run this on Windows laptops as well as Macs; regressions in paths, ffmpeg invocation, Qt, or
-OpenCV backends should surface in CI, not at a clinic.
-What: add `windows-latest` to the test matrix (ffmpeg via winget/choco, `uv sync --extra app --group qt`,
-`QT_QPA_PLATFORM=offscreen`), including the model-test job with cached weights.
-Pick-up check: confirm PySide6/onnxruntime/opencv still publish win_amd64 wheels for the pinned versions.
 
 ### B09 Longitudinal comparison with MDC
 Clinical · Added 2026-09-01 · Effort M · Depends on: B03 (measurement error), data store
@@ -323,6 +327,15 @@ reject public-domain dedications. Released snapshots stay public domain regardle
 What: decide between keeping the Unlicense, 0BSD, or Apache-2.0 (patent grant, contributor clarity);
 update LICENSE, pyproject, NOTICE, README, CLAUDE.md, and add a CONTRIBUTING note.
 Pick-up check: has anything been published or contributed since ADR-0009?
+
+### B51 Pose2Sim parity test is referenced by CI but does not exist
+Infra · Added 2026-09-06 · Effort S · Depends on: `opensim` extra installable in CI
+Why: `.github/workflows/ci.yml` has a manual `opensim-parity` job running
+`tests/integration/test_pose2sim_parity.py`, planned in ADR-0002 (compare our angles with
+`Pose2Sim.common.points_to_angles` on a fixture) but never written. The job would fail if dispatched.
+What: write the parity test (skip when Pose2Sim is not importable), confirm the `opensim` extra resolves
+on ubuntu-24.04, run the job once by hand.
+Pick-up check: Pose2Sim version pinned in pyproject still matches the vendored PROVENANCE commit.
 
 ### B40 Recent-trials list on the drop page
 UI · Added 2026-09-02 · Effort S

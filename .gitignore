@@ -28,3 +28,6 @@ ptvision-data/
 
 # Claude stuff
 decisions
+
+# CI model-weight cache (PTV_MODEL_DIR in .github/workflows/ci.yml)
+.ptv-models/
