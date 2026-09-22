@@ -8,3 +8,11 @@ population = "community-dwelling adults, meta-analysis of 14 studies"
 direction = "higher_is_worse"
 citation = "Bohannon RW. Reference values for the five-repetition sit-to-stand test: a descriptive meta-analysis of data from elders. Percept Mot Skills. 2006;103(1):215-222."
 note = "Times above the age-group mean are slower than average for that age group. Not a diagnostic threshold."
+
+[norms.gait_speed_bohannon2011]
+metric = "gait_speed"
+file = "gait_speed_bohannon2011.csv"
+population = "healthy adults walking at comfortable speed over 3–30 m, meta-analysis of 41 studies (n = 23,111), by sex and decade"
+direction = "lower_is_worse"
+citation = "Bohannon RW, Williams Andrews A. Normal walking speed: a descriptive meta-analysis. Physiotherapy. 2011;97(3):182-189."
+note = "Reference means for steady-state comfortable walking; not valid for walks timed from a standing start or including a turn. Values transcribed from Table 2 (the abstract confirms 143.4 cm/s for men 40–49 and 94.3 cm/s for women 80–99); verify the remaining strata against the paper before clinical use."

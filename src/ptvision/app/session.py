@@ -20,7 +20,7 @@ from ptvision.pose.tracking import select_primary_person
 from ptvision.quality.checks import QualityReport
 from ptvision.viz.status import BoneStatus, Mode, Rule
 
-PhaseKind = Literal["rise", "stand", "descent"]
+PhaseKind = Literal["rise", "stand", "descent", "stance", "swing"]
 DEFAULT_ANGLES = ["knee_flexion", "hip_flexion", "trunk_lean"]
 
 
@@ -68,6 +68,22 @@ def events_from_dict(
                 phases.append(Phase(int(r["descent_start"]), int(r["seated_return"]), "descent"))
         if d.get("test_start") is not None and d.get("test_end") is not None:
             window = (int(d["test_start"]), int(d["test_end"]))
+    elif d.get("segmenter") == "gait_zeni":
+        for e in d.get("events", []):
+            label = ("heel strike" if e["kind"] == "hs" else "toe-off") + f" {e['side'][0].upper()}"
+            markers.append(EventMarker(int(e["frame"]), label, None))
+        # shade stance/swing of the side with the most steady cycles
+        cycles = [c for c in d.get("cycles", []) if c.get("steady")]
+        sides = {c["side"] for c in cycles}
+        if sides:
+            side = max(sides, key=lambda s: sum(1 for c in cycles if c["side"] == s))
+            for c in cycles:
+                if c["side"] == side:
+                    phases.append(Phase(int(c["hs"]), int(c["to"]), "stance"))
+                    phases.append(Phase(int(c["to"]), int(c["next_hs"]), "swing"))
+        sw = d.get("steady_window")
+        if sw:
+            window = (int(sw[0]), int(sw[1]))
     markers.sort(key=lambda m: m.frame)
     return markers, phases, window
 

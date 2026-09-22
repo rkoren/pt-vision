@@ -254,6 +254,7 @@ def segment_sts(
     params: dict[str, Any] | StsParams,
     *,
     trunk_lean: np.ndarray | None = None,
+    **_: Any,
 ) -> StsEvents:
     """Velocity-threshold sit-to-stand segmentation on a single person's pelvis height."""
     p = params if isinstance(params, StsParams) else StsParams.from_dict(params)

@@ -4,7 +4,7 @@ with the measured value, the threshold, and a plain-language reason a clinician 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -198,7 +198,10 @@ def check_track(
         )
 
     # Left/right ordering instability of paired lower-limb keypoints (a symptom of side swaps).
+    # Not meaningful for gait, where the legs cross each other every step by design.
     pairs = [("LHip", "RHip"), ("LKnee", "RKnee"), ("LAnkle", "RAnkle")]
+    if protocol.protocol.family == "gait":
+        pairs = []
     flips = []
     for ln, rn in pairs:
         if lay.has(ln) and lay.has(rn):
@@ -243,6 +246,64 @@ def check_multi_person(full_track: PoseTrack) -> list[QualityCheck]:
             severity="warn",
         )
     ]
+
+
+def check_gait(
+    events: Any, track: PoseTrack, protocol: Protocol, *, min_cycles: int
+) -> list[QualityCheck]:
+    """Gait-specific checks on segmentation output and the raw single-person track."""
+    out: list[QualityCheck] = []
+    n = int(getattr(events, "n_cycles", 0))
+    out.append(
+        _mk(
+            "gait_cycles",
+            n >= min_cycles,
+            float(n),
+            float(min_cycles),
+            f"{n} steady gait cycles analysed",
+            f"only {n} steady gait cycles; the protocol needs at least {min_cycles}. Film a longer "
+            "walkway or more passes, and start walking before entering the frame.",
+        )
+    )
+    lay = track.layout
+    coords = track.coords[:, 0]
+    if lay.has("Hip") and track.image_size is not None:
+        hip_x = coords[:, lay.index("Hip"), 0]
+        with np.errstate(all="ignore"):
+            ext = np.nanmax(coords[..., 1], axis=1) - np.nanmin(coords[..., 1], axis=1)
+        body_h = float(np.nanmedian(ext)) if np.isfinite(ext).any() else 0.0
+        travel = float(np.nanmax(hip_x) - np.nanmin(hip_x)) if np.isfinite(hip_x).any() else 0.0
+        ratio = travel / body_h if body_h > 0 else 0.0
+        out.append(
+            _mk(
+                "walking_distance",
+                ratio >= 1.5,
+                ratio,
+                1.5,
+                f"subject crossed {ratio:.1f} body heights of frame",
+                f"subject moved only {ratio:.1f} body heights across the frame; the protocol "
+                "expects a walk across the field of view (not toward or away from the camera).",
+            )
+        )
+    for side, names in (("left", ("LHeel", "LBigToe")), ("right", ("RHeel", "RBigToe"))):
+        present = [n_ for n_ in names if lay.has(n_)]
+        if not present:
+            continue
+        sc = track.score[:, 0][:, lay.indices(*present)]
+        mean_sc = float(np.nanmean(sc)) if sc.size else 0.0
+        out.append(
+            _mk(
+                f"foot_confidence_{side}",
+                mean_sc >= 0.4,
+                mean_sc,
+                0.4,
+                f"{side} foot keypoints confidence {mean_sc:.2f}",
+                f"{side} foot keypoints are weak ({mean_sc:.2f}); heel-strike and toe-off timing "
+                "on that side is less reliable (typical of the far leg in a side view).",
+                severity="warn",
+            )
+        )
+    return out
 
 
 def check_camera_motion(video_path: Path | str) -> QualityCheck:

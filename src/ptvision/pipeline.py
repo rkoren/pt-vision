@@ -362,10 +362,17 @@ def analyze(
     from ptvision.kinematics.angles import ANGLE_DEFS, compute_angles
     from ptvision.kinematics.export import write_mot, write_trc
     from ptvision.kinematics.preprocess import PreprocessConfig, preprocess
+    from ptvision.kinematics.scale import build_scale
     from ptvision.pose.overlay import thumbnail
     from ptvision.quality import checks as Q
     from ptvision.report.build import build_report
-    from ptvision.report.figures import fig_angles, fig_per_rep, fig_sts_trajectory
+    from ptvision.report.figures import (
+        fig_angles,
+        fig_gait_cycles,
+        fig_gait_events,
+        fig_per_rep,
+        fig_sts_trajectory,
+    )
     from ptvision.report.schema import Figure, ReportBundle
 
     opts = opts or AnalyzeOptions()
@@ -467,6 +474,26 @@ def analyze(
     angles = compute_angles(pre.filtered, angle_names, side="near")
     angles_raw = compute_angles(pre.raw, angle_names, side=angles.side)
 
+    # 4b. pixel -> metre scale (optional, needs the subject's height)
+    scale = None
+    if protocol.scale.method == "subject_height":
+        if capture.subject.height_m:
+            try:
+                scale = build_scale(
+                    pre.filtered,
+                    fps=cam.fps,
+                    height_m=capture.subject.height_m,
+                    floor_angle=protocol.scale.floor_angle,
+                )
+                prov.preprocess["scale"] = scale.to_dict()
+            except ValueError as e:
+                warnings.append(f"scale unavailable: {e}")
+        else:
+            warnings.append(
+                "subject height not recorded; distances and speed are reported as unavailable "
+                "(pass --height-m)"
+            )
+
     # 5. segment
     stage("segmenting")
     seg_entry = registry.get_segmenter(protocol.segmenter.name)
@@ -483,10 +510,16 @@ def analyze(
         cam.fps,
         seg_params,
         trunk_lean=angles["trunk_lean"] if "trunk_lean" in angles.names else None,
+        image_size=(cam.width, cam.height),
     )
     prov.segmenter = {"name": seg_entry.name, "version": seg_entry.version, "params": seg_params}
     warnings += list(getattr(events, "warnings", []))
-    expected = int(seg_params.get("n_reps_expected", -1))
+    family = protocol.protocol.family
+    if family == "gait":
+        checks += Q.check_gait(
+            events, single, protocol, min_cycles=int(seg_params.get("min_cycles", 3))
+        )
+    expected = int(seg_params.get("n_reps_expected", -1)) if family != "gait" else -1
     if expected > 0:
         n = getattr(events, "n_reps", 0)
         checks.append(
@@ -515,6 +548,7 @@ def analyze(
         capture=capture,
         protocol=protocol,
         fps=cam.fps,
+        scale=scale,
     )
     metrics: list[Metric] = []
     norms: list[NormComparison] = []
@@ -546,6 +580,37 @@ def analyze(
     figures: list[Figure] = []
     thumbs: list[Figure] = []
     fig_dir = run.path / "figures"
+    if family == "gait" and hasattr(events, "signals"):
+        fig_gait_events(events, fig_dir / "gait_events.png")
+        figures.append(
+            Figure(
+                name="gait_events",
+                path="figures/gait_events.png",
+                caption=(
+                    "Heel and toe positions relative to the pelvis along the walking direction; "
+                    "▼ heel strikes, ▲ toe-offs; grey = walking bouts; "
+                    "dashed = steady-state window."
+                ),
+            )
+        )
+        if getattr(events, "n_cycles", 0):
+            fig_gait_cycles(
+                angles.frame,
+                events,
+                angles.side,
+                fig_dir / "gait_cycles.png",
+                names=[a for a in protocol.report.angles if a in angles.names],
+            )
+            figures.append(
+                Figure(
+                    name="gait_cycles",
+                    path="figures/gait_cycles.png",
+                    caption=(
+                        f"Angles over the gait cycle ({angles.side} side), mean ± SD across "
+                        "steady cycles; dotted = mean toe-off."
+                    ),
+                )
+            )
     if hasattr(events, "height_norm"):
         fig_sts_trajectory(events, fig_dir / "sts_trajectory.png")
         figures.append(
@@ -585,7 +650,7 @@ def analyze(
             ),
         )
     )
-    if video.exists() and getattr(events, "reps", None):
+    if video.exists() and getattr(events, "reps", None) and family != "gait":
         for r in events.reps:
             p = fig_dir / f"seat_off_{r.index + 1}.jpg"
             try:
@@ -637,6 +702,16 @@ def analyze(
             f"{pcfg.interp_max_gap_s} s linearly interpolated; Hampel outlier rejection (window "
             f"{pcfg.hampel_window}); zero-phase Butterworth low-pass {pcfg.filter_cutoff_hz:g} Hz "
             f"(order {pcfg.filter_order})."
+        ),
+        (
+            "Scale: "
+            + (
+                f"{scale.px_per_m:.1f} px/m from the subject's height ({scale.height_m} m, "
+                f"{scale.height_px:.0f} px over {scale.n_frames_used} upright frames); floor angle "
+                f"{np.degrees(scale.floor_angle_rad):.1f}°."
+                if scale is not None
+                else "not available (no subject height); distances not reported."
+            )
         ),
         (
             f"Segmentation: {seg_entry.name} v{seg_entry.version}: "

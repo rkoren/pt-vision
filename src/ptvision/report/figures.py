@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import matplotlib
 
@@ -139,6 +140,80 @@ def fig_per_rep(ev: StsEvents, out: Path) -> Path:
     ax.set_ylabel("seconds")
     ax.legend(frameon=False, fontsize=8)
     ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+    return out
+
+def fig_gait_events(ev: Any, out: Path) -> Path:
+    """Heel and toe positions relative to the pelvis (anterior +) with detected events."""
+    fps = ev.fps
+    n = len(next(iter(ev.signals.values())))
+    t = np.arange(n) / fps
+    fig, axes = plt.subplots(2, 1, figsize=(10, 5.2), sharex=True)
+    colors = {"left": "#1f77b4", "right": "#d62728"}
+    for ax, kind, title in (
+        (axes[0], "heel", "heel (heel strike = local maximum)"),
+        (axes[1], "toe", "toe (toe-off = local minimum)"),
+    ):
+        for side in ("left", "right"):
+            ax.plot(t, ev.signals[f"{kind}_{side}"], color=colors[side], lw=1.3, label=side)
+        for e in ev.events:
+            if e.kind == ("hs" if kind == "heel" else "to"):
+                y = ev.signals[f"{kind}_{e.side}"][e.frame]
+                ax.plot(
+                    e.frame / fps, y, "v" if kind == "heel" else "^", color=colors[e.side], ms=7
+                )
+        for b in ev.bouts:
+            ax.axvspan(b.start / fps, b.end / fps, color="#eeeeee", lw=0, zorder=-10)
+        win = ev.steady_window()
+        if win:
+            ax.axvline(win[0] / fps, color="k", ls="--", lw=1)
+            ax.axvline(win[1] / fps, color="k", ls="--", lw=1)
+        ax.set_ylabel(f"{kind} − pelvis (px)")
+        ax.set_title(title, fontsize=10)
+        ax.spines[["top", "right"]].set_visible(False)
+    axes[0].legend(loc="upper right", fontsize=8, frameon=False)
+    axes[1].set_xlabel("time (s)")
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+    return out
+
+
+def fig_gait_cycles(
+    angles: pd.DataFrame, ev: Any, side: str, out: Path, names: list[str] | None = None
+) -> Path:
+    """Angles normalised to % gait cycle (heel strike to heel strike), mean ± SD over cycles."""
+    names = [n for n in (names or list(angles.columns)) if n in angles.columns]
+    cycles = [c for c in ev.steady_cycles() if c.side == side]
+    fig, axes = plt.subplots(
+        1, max(1, len(names)), figsize=(3.4 * max(1, len(names)), 3.2), squeeze=False
+    )
+    grid = np.linspace(0, 100, 101)
+    for ax, name in zip(axes[0], names, strict=False):
+        curves = []
+        for c in cycles:
+            seg = angles[name].to_numpy()[c.hs : c.next_hs + 1]
+            if seg.size < 3 or np.isnan(seg).all():
+                continue
+            x = np.linspace(0, 100, seg.size)
+            ok = ~np.isnan(seg)
+            curves.append(np.interp(grid, x[ok], seg[ok]))
+        if curves:
+            arr = np.vstack(curves)
+            m, s = arr.mean(axis=0), arr.std(axis=0)
+            ax.fill_between(grid, m - s, m + s, color="#7fb3ff", alpha=0.35, lw=0)
+            ax.plot(grid, m, color="#1f4e79", lw=1.6)
+            to_pct = np.mean([100.0 * c.stance / c.stride for c in cycles]) if cycles else None
+            if to_pct is not None:
+                ax.axvline(to_pct, color="#ef6c00", ls=":", lw=1)
+        ax.set_title(f"{name.replace('_', ' ')} ({side}, n={len(curves)})", fontsize=9)
+        ax.set_xlabel("% gait cycle")
+        ax.set_ylabel("deg")
+        ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=130)

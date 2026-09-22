@@ -7,13 +7,16 @@ seat-off / stand events within ±2 frames of manual annotation. Record everythin
 
 | clip | date | subject | fps | view side | reps | notes |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| sts1.MOV | 2026-09-22 | A (m, 26, 1.80 m) | 30 | left, three-quarter, portrait | 5 | starts standing; recording ends on the 5th rise |
+| sts2.MOV | 2026-09-22 | A | 30 | right, three-quarter, portrait | 5 | camera_view fail at 0.37; recording ends on the 5th rise |
+| sts34.MOV | 2026-09-22 | A | 59.94 VFR, 4K | frontal | 10 | deliberate view-check failure; two sets of 5 |
 
 ## Total time vs stopwatch
 
 | clip | stopwatch (s) | ptvision (s) | diff (s) | start rule | end rule |
 |---|---|---|---|---|---|
-| | | | | | |
+| sts1.MOV | 7.01 | 6.90 | −0.11 | first_seat_off | fifth_stand (truncated: frame 235/238) |
+| sts2.MOV | 10.2 | 9.67 | −0.53 | first_seat_off | fifth_stand (truncated: frame 334/335) |
 
 ## Event frames vs manual annotation
 
@@ -26,4 +29,7 @@ leave the seat; stand = first frame the hips stop rising; seated = first frame f
 
 ## Decisions
 - start/end rule agreed with PT partner: (pending)
-- observed failure modes and parameter changes: (pending)
+- observed failure modes and parameter changes: both takes stopped recording during the fifth rise, so the
+  end event is clipped (B60); ghost tracks on furniture (B56); oblique-view hard fail (B57); pre-test
+  descent (B58); camera-motion warning from subject motion (B59). Hand-timed comparison is not yet a
+  valid accuracy figure until re-recorded with 2 s of tail.

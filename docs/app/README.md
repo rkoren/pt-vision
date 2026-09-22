@@ -20,3 +20,9 @@
 
 Screenshots were taken with `PTV_APP_SCREENSHOT=<png> ptv app <trial>` on the offscreen platform,
 which is also how CI exercises the widgets (`tests/app`, pytest-qt).
+
+![Walkway gait on a synthetic trial](viewer-gait-synthetic.png)
+
+For gait trials the timeline shades stance (green) and swing (blue) of the side with the most steady
+cycles, the dashed lines mark the steady-state window, and the events list holds every heel strike and
+toe-off by side.

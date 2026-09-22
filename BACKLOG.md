@@ -41,30 +41,6 @@ fill `docs/validation/sts-v0.md`; settle `start_rule`/`end_rule` with the PT par
 Refs: Bertrand 2026 (ICC 0.995), Hwang 2026 (RGB STS).
 Pick-up check: verify the capture guide still matches the segmenter parameters.
 
-### B04 Slice 2: sagittal walkway gait timing and speed
-Clinical · Added 2026-09-01 · Effort L · Depends on: B05 for speed/step length
-Why: Gait speed, cadence, stance/swing and symmetry are Tier-1 outcomes with strong single-camera evidence
-(Stenum 2021/2024: timing MAE 0.02 s, speed 0.02–0.04 m/s incl. stroke and PD).
-What: `segmenters/gait_zeni.py` (heel strike = max anterior heel displacement relative to hip midpoint,
-toe-off = max posterior toe displacement; velocity-zero-crossing variant), walking direction from hip x,
-accel/decel exclusion zones, ≥3 steady cycles; metrics: cadence, stance/swing %, double support,
-step-time symmetry index, gait speed (flag depth error), step length as bout mean only (test enforces
-`per_event=None`); tier-2 peak knee/hip flexion per cycle with Stenum error bands; norms Bohannon &
-Williams Andrews 2011 (sex × decade; requires steady-state capture, no turn); quality: not walking
-toward/away camera, both feet visible; adapt `opencap-processing/ActivityAnalyses/gait_analysis.py`
-(Apache-2.0) scalars; regression data from Fukuchi 2018 (CC BY 4.0).
-Refs: Zeni 2008 (PMC2384115); Stenum 2021 PLoS Comput Biol; Stenum 2024 PLOS Digit Health.
-Pick-up check: confirm heel/toe keypoint confidence on real sagittal clips before relying on Zeni events.
-
-### B05 Pixel-to-metre scaling and floor line
-Kinematics · Added 2026-09-01 · Effort M · Depends on: subject height in capture
-Why: Gait speed and step length need metres; Sports2D already solved the single-camera version.
-What: port Sports2D `compute_height`, `best_coords_for_measurements`, `compute_floor_line`,
-`convert_px_to_meters`, perspective compensation (BSD-3, ~150 lines) into `kinematics/scale.py`; record
-scale factor and method in provenance; write TRC in metres alongside pixels.
-Refs: Sports2D `process.py` (v0.8.34).
-Pick-up check: re-read upstream at pick-up time; the floor-line method changed between releases.
-
 ### B06 Left/right swap mitigation in sagittal view
 Pose · Added 2026-09-01 · Effort M–L · Depends on: real clips showing the problem
 Why: The #1 failure mode for side-specific angles (Sports2D issue #39); unsolved in open source.
@@ -313,6 +289,89 @@ What: write the parity test (skip when Pose2Sim is not importable), confirm the 
 on ubuntu-24.04, run the job once by hand.
 Pick-up check: Pose2Sim version pinned in pyproject still matches the vendored PROVENANCE commit.
 
+### B52 Real walkway gait validation clips
+Validation · Added 2026-09-06 · Effort M · Depends on: volunteers, a measured walkway
+Why: Slice 2 is validated on synthetic walking only. Speed and step length need a ground truth.
+What: film 3+ passes each direction per `docs/capture-guides/gait.md` with a tape measure or two floor
+marks a known distance apart in frame (so speed can be checked without a stopwatch), 30 and 60 fps;
+annotate heel strikes on one pass; compare timing (target ±2 frames), speed (target ±0.05 m/s) and
+step length; commit a pose Parquet fixture; record results in `docs/validation/gait-v0.md`.
+Pick-up check: confirm the Bohannon 2011 table transcription against the paper at the same time.
+
+### B53 Gait timing at 60 fps and the asymmetry noise floor
+Clinical · Added 2026-09-06 · Effort S
+Why: at 30 fps a step is ~16 frames, so one frame of event jitter is ~6 % apparent asymmetry; the
+symmetry metrics now carry that as their error, but 60 fps halves it.
+What: recommend 60 fps in the capture guide once real clips confirm event accuracy; consider sub-frame
+event refinement (parabolic peak interpolation on the Zeni signals).
+
+### B54 Depth-perspective correction for walkway gait
+Kinematics · Added 2026-09-06 · Effort M · Depends on: B52
+Why: Sports2D corrects the far-limb-looks-smaller effect using camera distance; we dropped that term in
+v1 (subject assumed at constant depth). Stenum reports step length bias vs position in frame.
+What: add optional `distance_m`/`fov_deg` to the capture and the perspective term to `ScaleModel`;
+quantify the gain on B52 clips before keeping it.
+
+### B55 Video timing-integrity check at ingest
+Infra · Added 2026-09-09 · Effort S
+Why: Timing metrics assume every frame is real and evenly spaced. A dropped or duplicated frame from
+variable frame rate, resampling, or a bad container silently shifts every event. A stopwatch in frame
+would reveal this, but we are replacing that with a hand-timed total (session 1 shot list), so the
+check must come from the file itself.
+What: in `pipeline.ingest`/`quality.check_capture`, compare `n_frames / fps` with the container
+duration for both the source and the normalized file (fail if they differ by > 0.05 s or by more than
+one frame per 10 s); record both in `capture.json`; warn when the source was VFR with a large spread
+between nominal and average frame rate. Optionally decode the normalized file once and count frames
+to catch a wrong `nb_frames` header.
+Pick-up check: confirm whether ffprobe's `nb_frames` is reliable for the phone codecs actually seen in
+session 1 (HEVC .mov); if not, count packets.
+
+### B56 Spurious short-lived tracks from background objects
+Pose · Added 2026-09-22 · Effort S · Found on: session-1 clips
+Why: On every real clip the detector briefly fires on furniture, a plush toy, a mirror reflection
+(4–16 frames each, scores 0.2–0.5). They get person ids, clutter the overlay ("id 3" on a toy) and
+inflate `n_persons`; on the frontal clip the subject was assigned id 8 among 11 ghosts.
+What: after tracking, drop tracks present < `min_track_s` (0.5 s) or with mean score < 0.4 unless
+they are the only candidate; keep the raw detections in Parquet but mark tracks `spurious` so the
+overlay hides them and quality checks ignore them; primary-person selection unchanged.
+Pick-up check: confirm no legitimate short-lived second person (therapist stepping in) is dropped.
+
+### B57 `camera_view` check is a hard fail at a borderline ratio
+Quality · Added 2026-09-22 · Effort S · Found on: session-1 sts2 (ratio 0.37 vs threshold 0.35)
+Why: A three-quarter view failed the sagittal check by 0.02 while all five reps and timings came out
+clean. Timing metrics degrade gracefully with view angle; angles do not.
+What: make it a band: ratio < 0.35 pass, 0.35–0.5 warn ("oblique view; angles less reliable"),
+> 0.5 fail; record the ratio in the report as an estimated view angle; capture guide already says
+perpendicular.
+Pick-up check: re-derive the thresholds from the session-1 clips (pure sagittal ≈ ?, frontal 0.63).
+
+### B58 Test-start rule when the recording begins standing
+Clinical · Added 2026-09-22 · Effort S · Found on: session-1 sts1/sts2
+Why: Both sagittal clips start with the subject standing and sitting down before the test; the
+segmenter correctly ignores that descent (start = first seat-off) but the trajectory figure shows a
+large pre-test excursion and normalisation uses it. Also the first stand overshoots to 1.1 because
+the 95th percentile is set by later, lower stands.
+What: normalise on the post-`test_start` window (or on seated/standing plateaus) and note "recording
+began standing" in the report; confirm with the PT partner whether the clinic protocol starts seated.
+
+### B59 Camera-motion warning on tripod clips
+Quality · Added 2026-09-22 · Effort S · Found on: session-1 (3–5 px on every clip)
+Why: Every clip warned about camera motion; the subject's own movement dominates the phase
+correlation when the person fills much of a portrait frame.
+What: mask the subject's bounding box out of the correlation (keypoints are known) or correlate on
+the frame border; re-check the 2 px threshold at 1080p portrait.
+
+### B60 Warn when a timed event is truncated by the clip boundary
+Quality · Added 2026-09-22 · Effort S · Found on: session-1 sts1/sts2
+Why: In both real clips the fifth stand fell on the last 1–3 frames of the recording, so
+`stand_reached` was really "recording stopped"; measured times were 0.11 s and 0.53 s short of the
+hand-timed 7.01 s and 10.2 s. The report gave a confident ± 0.07 s.
+What: in `segment_sts` (and gait), if `test_start` or `test_end` is within `edge_margin_s` (0.3 s)
+of the clip start/end, add a warning and a `truncated` flag on the metric; quality check
+`test_truncated` → fail for the primary metric; note in the capture guide (already says record 2 s
+after the last movement).
+Pick-up check: apply the same idea to gait bouts that touch the clip edge.
+
 ### B40 Recent-trials list on the drop page
 UI · Added 2026-09-02 · Effort S
 What: QSettings-backed list of recently opened trials.
@@ -325,6 +384,11 @@ What: QSettings-backed list of recently opened trials.
 
 ## Done
 
+- 2026-09-06 B04 + B05 Slice 2 gait (`gait_sagittal`): Zeni 2008 heel-strike/toe-off events, walking bouts,
+  steady-state cycles, cadence, stance/swing/double support, step- and stance-time asymmetry with an error
+  floor, gait speed and bout-mean step/stride length in metres from subject height (Sports2D-style height
+  and floor-line estimate), sagittal knee/hip angles per cycle, Bohannon 2011 speed norms, gait report,
+  app support. Synthetic-validated only (B52 for real clips).
 - 2026-09-06 B44 Windows CI: `windows-latest` in both matrices, ffmpeg via Chocolatey, bash for every step,
   portable model cache (`PTV_MODEL_DIR`), `.gitattributes` enforcing LF, `workflow_dispatch` trigger.
   First green run on the `ci-windows` PR. Surfaced B51 (parity test referenced by CI but missing).

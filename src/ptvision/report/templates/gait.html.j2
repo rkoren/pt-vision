@@ -1,0 +1,49 @@
+{% extends "base.html.j2" %}
+{% block body %}
+  {% if b.primary %}
+  <div class="card primary" style="margin-top:18px">
+    <div class="label">{{ b.primary.label }} <span class="tier">tier {{ b.primary.tier }}</span></div>
+    <div class="value">{{ b.primary.formatted() }}</div>
+    {% if b.primary.note %}<div class="meta">{{ b.primary.note }}</div>{% endif %}
+    {% if b.primary_norm %}
+      <p style="margin:10px 0 0">{{ b.primary_norm.statement }}<br>
+      <span class="meta">Reference: {{ b.primary_norm.citation }}</span></p>
+    {% endif %}
+    {% if b.primary.flags %}<p class="meta">Notes: {{ b.primary.flags | join("; ") }}</p>{% endif %}
+  </div>
+  {% endif %}
+
+  <h2>Measurements</h2>
+  <table>
+    <tr><th>measure</th><th>value</th><th>error</th><th>n</th><th>tier</th><th>per cycle</th></tr>
+    {% for m in b.metrics %}
+    <tr>
+      <td>{{ m.label }}{% if m.side %} <span class="meta">({{ m.side }})</span>{% endif %}</td>
+      <td class="num">{{ m.formatted() }}</td>
+      <td class="meta">{% if m.error is not none %}{{ m.error_kind }}{% endif %}</td>
+      <td class="num">{{ m.n_events if m.n_events is not none else "" }}</td>
+      <td><span class="tier">{{ m.tier }}</span></td>
+      <td class="meta">{% if m.per_event %}{{ m.per_event | join(", ") }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  {% for f in b.figures %}
+  <figure><img src="{{ f.path }}" alt="{{ f.name }}"><figcaption>{{ f.caption }}</figcaption></figure>
+  {% endfor %}
+
+  {% if b.events.cycles %}
+  <h2>Gait cycles (frames at {{ "%.2f" | format(b.events.fps) }} fps; steady cycles feed the metrics)</h2>
+  <table>
+    <tr><th>side</th><th>heel strike</th><th>contra. toe-off</th><th>contra. heel strike</th><th>toe-off</th><th>next heel strike</th><th>stance %</th><th>steady</th></tr>
+    {% for c in b.events.cycles %}
+    <tr><td>{{ c.side }}</td><td class="num">{{ c.hs }}</td><td class="num">{{ c.contra_to }}</td><td class="num">{{ c.contra_hs }}</td><td class="num">{{ c.to }}</td><td class="num">{{ c.next_hs }}</td><td class="num">{{ "%.0f" | format(100 * c.stance / c.stride) }}</td><td>{{ "yes" if c.steady else "edge" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if b.warnings %}
+  <h2>Warnings</h2>
+  <ul class="compact">{% for w in b.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% endif %}
+{% endblock %}

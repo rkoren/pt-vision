@@ -73,3 +73,40 @@ def test_events_from_dict_shapes() -> None:
     assert [p.kind for p in phases] == ["rise", "stand", "descent", "rise"]
     assert window == (10, 90)
     assert events_from_dict({"segmenter": "other"}) == ([], [], None)
+
+
+def test_events_from_dict_gait() -> None:
+    d = {
+        "segmenter": "gait_zeni",
+        "steady_window": [30, 120],
+        "events": [
+            {"frame": 30, "side": "left", "kind": "hs", "bout": 0},
+            {"frame": 50, "side": "left", "kind": "to", "bout": 0},
+        ],
+        "cycles": [
+            {
+                "side": "left",
+                "bout": 0,
+                "hs": 30,
+                "to": 50,
+                "next_hs": 63,
+                "contra_hs": 46,
+                "contra_to": 34,
+                "steady": True,
+            },
+            {
+                "side": "right",
+                "bout": 0,
+                "hs": 46,
+                "to": 66,
+                "next_hs": 79,
+                "contra_hs": 63,
+                "contra_to": 50,
+                "steady": False,
+            },
+        ],
+    }
+    markers, phases, window = events_from_dict(d)
+    assert [m.label for m in markers] == ["heel strike L", "toe-off L"]
+    assert [(p.kind, p.start, p.end) for p in phases] == [("stance", 30, 50), ("swing", 50, 63)]
+    assert window == (30, 120)
