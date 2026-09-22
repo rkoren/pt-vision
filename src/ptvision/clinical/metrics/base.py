@@ -9,9 +9,10 @@ from pydantic import BaseModel, Field
 
 from ptvision.data.models import Capture
 from ptvision.kinematics.angles import AngleSeries
+from ptvision.kinematics.scale import ScaleModel
 from ptvision.pose.track import PoseTrack
 
-ErrorKind = Literal["resolution", "mdd", "rmse", "ci95", "sd", "unknown"]
+ErrorKind = Literal["resolution", "mdd", "rmse", "mae", "ci95", "sd", "unknown"]
 
 
 class Metric(BaseModel):
@@ -30,6 +31,8 @@ class Metric(BaseModel):
     per_event: list[float] | None = None
     note: str | None = None
 
+    _DIGITS: dict[str, int] = {"s": 2, "m/s": 2, "m": 2, "%": 1, "steps/min": 1}
+
     def formatted(self) -> str:
         if self.value is None:
             return "n/a"
@@ -38,9 +41,14 @@ class Metric(BaseModel):
         if self.units == "deg":
             v = f"{round(self.value):d}°"
             return f"{v} ± {round(self.error):d}°" if self.error is not None else v
-        digits = 2 if self.units == "s" else 1
+        digits = self._DIGITS.get(self.units, 1)
         v = f"{self.value:.{digits}f} {self.units}"
-        return f"{v} ± {self.error:.{digits}f}" if self.error is not None else v
+        if self.error is None:
+            return v
+        err_digits = digits
+        while err_digits < 3 and 0 < self.error < 0.5 * 10**-err_digits:
+            err_digits += 1  # never print a non-zero error as 0.0
+        return f"{v} ± {self.error:.{err_digits}f}"
 
 
 class NormComparison(BaseModel):
@@ -65,4 +73,5 @@ class MetricContext:
     capture: Capture
     protocol: Any
     fps: float
+    scale: ScaleModel | None = None
     params: dict[str, Any] = field(default_factory=dict)

@@ -307,6 +307,9 @@ def analyze(
             help="Overlay coloring: rules | confidence (default rules if the protocol has any)."
         ),
     ] = None,
+    max_height: Annotated[
+        int | None, typer.Option(help="Downscale to this height during ingest (e.g. 1080 for 4K).")
+    ] = None,
 ) -> None:
     """Run a clinical protocol on a video and write a report."""
     from ptvision.io.video import require_ffmpeg
@@ -331,6 +334,7 @@ def analyze(
         manual_start_s=t0,
         subject=_subject_from_flags(age, height_m, sex),
         color_by=color_by,  # type: ignore[arg-type]
+        max_height=max_height,
     )
     if color_by not in (None, "rules", "confidence"):
         err.print("[red]--color-by must be rules or confidence[/]")

@@ -6,7 +6,7 @@ import hashlib
 import tomllib
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -48,6 +48,11 @@ class PreprocessSpec(BaseModel):
     filter_order: int = 4
     filter_cutoff_hz: float = 6.0
     segment_signal_cutoff_hz: float = 3.0
+
+
+class ScaleSpec(BaseModel):
+    method: Literal["none", "subject_height"] = "none"
+    floor_angle: Literal["auto"] | float = "auto"
 
 
 class SegmenterSpec(BaseModel):
@@ -121,6 +126,7 @@ class Protocol(BaseModel):
     capture: CaptureSpec = Field(default_factory=CaptureSpec)
     pose: PoseSpec = Field(default_factory=PoseSpec)
     preprocess: PreprocessSpec = Field(default_factory=PreprocessSpec)
+    scale: ScaleSpec = Field(default_factory=ScaleSpec)
     segmenter: SegmenterSpec
     metrics: list[MetricSpec]
     rules: list[RuleSpec] = Field(default_factory=list)

@@ -216,3 +216,148 @@ def synth_video(path: Path, seconds: float, fps: float, size: str = "854x480") -
         check=True,
     )
     return path
+
+@dataclass
+class GaitTimeline:
+    fps: float = 30.0
+    duration_s: float = 7.5
+    speed_px_s: float = 230.0  # pelvis forward speed (~0.9 m/s at ~260 px/m)
+    stride_s: float = 1.1  # one gait cycle
+    stance_frac: float = 0.62
+    stance_frac_right: float | None = None  # set to make the right side asymmetric
+    direction: int = 1  # +1 walks toward image-right
+    x0: float = 60.0
+    floor_y: float = 900.0
+    thigh_px: float = 130.0
+    shank_px: float = 130.0
+    foot_lift_px: float = 30.0
+    image_size: tuple[int, int] = (1920, 1080)
+    near_side: str = "left"
+    hs: dict[str, list[int]] = field(default_factory=dict)
+    to: dict[str, list[int]] = field(default_factory=dict)
+
+    @property
+    def stride_px(self) -> float:
+        return self.speed_px_s * self.stride_s
+
+    @property
+    def n_frames(self) -> int:
+        return round(self.duration_s * self.fps)
+
+    def stance_frac_for(self, side: str) -> float:
+        if side == "right" and self.stance_frac_right is not None:
+            return self.stance_frac_right
+        return self.stance_frac
+
+
+def _two_link_knee(
+    hip: np.ndarray, ankle: np.ndarray, l1: float, l2: float, forward: int
+) -> np.ndarray:
+    """Knee position for a planar two-link leg, choosing the anterior (forward-bending) solution."""
+    d_vec = ankle - hip
+    d = np.linalg.norm(d_vec, axis=1)
+    d = np.clip(d, 1e-6, l1 + l2 - 1e-3)
+    unit = d_vec / d[:, None]
+    a = (l1**2 - l2**2 + d**2) / (2 * d)
+    h = np.sqrt(np.clip(l1**2 - a**2, 0, None))
+    p = hip + a[:, None] * unit
+    perp = np.stack([-unit[:, 1], unit[:, 0]], axis=1)
+    k1 = p + h[:, None] * perp
+    k2 = p - h[:, None] * perp
+    pick = np.where((k1[:, 0] - k2[:, 0]) * forward >= 0, 1, 0)
+    return np.where(pick[:, None] == 1, k1, k2)
+
+
+def synthetic_gait_track(
+    tl: GaitTimeline | None = None,
+    *,
+    noise_px: float = 0.0,
+    seed: int = 0,
+) -> tuple[PoseTrack, GaitTimeline]:
+    """A single person walking across the frame in the sagittal plane.
+
+    Each foot alternates a stationary stance and a smooth swing of one stride; knees follow from a
+    two-link inverse kinematics so knee flexion rises during swing. `tl.hs`/`tl.to` are filled with the
+    ground-truth event frames per side.
+    """
+    tl = tl or GaitTimeline()
+    rng = np.random.default_rng(seed)
+    fps, T = tl.fps, tl.stride_s
+    n = tl.n_frames
+    t = np.arange(n) / fps
+    hip_x = tl.x0 + tl.speed_px_s * t
+    # ankle sits 18 px above the heel; leg ~98.5% extended at midstance -> ~20 deg knee flexion
+    hip_y = np.full(n, tl.floor_y - 18 - (tl.thigh_px + tl.shank_px) * 0.985)
+    lead = 0.25 * tl.stride_px  # heel lands this far ahead of the pelvis
+    feet: dict[str, dict[str, np.ndarray]] = {}
+    tl.hs, tl.to = {}, {}
+    for side, phase in (("left", 0.0), ("right", 0.5)):
+        sf = tl.stance_frac_for(side)
+        tau_abs = t / T - phase  # cycles since this side's first (virtual) heel strike
+        k = np.floor(tau_abs)
+        tau = tau_abs - k
+        # landing position of the current cycle's stance foot
+        t_land = (k + phase) * T
+        x_land = tl.x0 + tl.speed_px_s * t_land + lead
+        in_stance = tau < sf
+        p = np.clip((tau - sf) / (1 - sf), 0, 1)
+        swing_x = x_land + tl.stride_px * smoothstep(p)
+        heel_x = np.where(in_stance, x_land, swing_x)
+        heel_y = np.where(in_stance, tl.floor_y, tl.floor_y - tl.foot_lift_px * np.sin(np.pi * p))
+        feet[side] = {"heel_x": heel_x, "heel_y": heel_y}
+        hs_frames = [
+            round(((kk + phase) * T) * fps) for kk in range(-1, int(tl.duration_s / T) + 2)
+        ]
+        to_frames = [
+            round(((kk + phase + sf) * T) * fps) for kk in range(-1, int(tl.duration_s / T) + 2)
+        ]
+        tl.hs[side] = [f for f in hs_frames if 0 <= f < n]
+        tl.to[side] = [f for f in to_frames if 0 <= f < n]
+
+    K = HALPE26.n
+    coords = np.full((n, 1, K, 2), np.nan, dtype=np.float32)
+    score = np.zeros((n, 1, K), dtype=np.float32)
+
+    def put(name: str, x: np.ndarray, y: np.ndarray, sc: float) -> None:
+        coords[:, 0, HALPE26.index(name), 0] = x
+        coords[:, 0, HALPE26.index(name), 1] = y
+        score[:, 0, HALPE26.index(name)] = sc
+
+    lean = np.radians(5.0)
+    neck_x = hip_x + 150 * np.sin(lean)
+    neck_y = hip_y - 150 * np.cos(lean)
+    hip = np.stack([hip_x, hip_y], axis=1)
+    for side, dz in (("left", -6.0), ("right", 6.0)):
+        near = side == tl.near_side
+        sc = 0.9 if near else 0.72
+        S = "L" if side == "left" else "R"
+        hx, hy = feet[side]["heel_x"], feet[side]["heel_y"]
+        ankle = np.stack([hx + 14, hy - 18], axis=1)
+        knee = _two_link_knee(hip, ankle, tl.thigh_px, tl.shank_px, forward=1)
+        put(f"{S}Hip", hip_x + dz, hip_y, sc)
+        put(f"{S}Knee", knee[:, 0] + dz, knee[:, 1], sc)
+        put(f"{S}Ankle", ankle[:, 0] + dz, ankle[:, 1], sc)
+        put(f"{S}Heel", hx + dz, hy, sc)
+        put(f"{S}BigToe", hx + 68 + dz, hy + 2, sc)
+        put(f"{S}SmallToe", hx + 60 + dz, hy + 4, sc)
+        arm = np.sin(2 * np.pi * (t / T - (0.5 if side == "left" else 0.0)))
+        sh_x, sh_y = neck_x + dz, neck_y + 12
+        put(f"{S}Shoulder", sh_x, sh_y, sc)
+        put(f"{S}Elbow", sh_x + 30 * arm, sh_y + 60, sc)
+        put(f"{S}Wrist", sh_x + 55 * arm, sh_y + 95, sc)
+        put(f"{S}Eye", neck_x + 20 + dz, neck_y - 38, sc)
+        put(f"{S}Ear", neck_x + 6 + dz, neck_y - 34, sc)
+    put("Hip", hip_x, hip_y, 0.9)
+    put("Neck", neck_x, neck_y, 0.9)
+    put("Head", neck_x + 6, neck_y - 32, 0.9)
+    put("Nose", neck_x + 24, neck_y - 26, 0.9)
+
+    if tl.direction < 0:
+        w = tl.image_size[0]
+        coords[..., 0] = w - coords[..., 0]
+    if noise_px > 0:
+        coords += rng.normal(0, noise_px, coords.shape).astype(np.float32)
+    track = PoseTrack(
+        HALPE26, fps, coords, score, np.array([0], dtype=np.int16), image_size=tl.image_size
+    )
+    return track, tl
