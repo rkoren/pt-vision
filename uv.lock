@@ -326,6 +326,29 @@ wheels = [
 ]
 
 [[package]]
+name = "ezc3d"
+version = "1.7.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/6d/4b14f5519721d9ee5bc62fa562b6a3e4b36d0bdeb8af5f41164422d2a863/ezc3d-1.7.2.tar.gz", hash = "sha256:1bc74de6d331b621142850cc8438ccbd8390a0db8b4000b3e0c0303d364f534d", size = 146046, upload-time = "2026-08-07T19:51:17.182Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/a9/e8e31c8a530d3431923c6d81b0189b191ac6f5bb414755f3b183c50a0fff/ezc3d-1.7.2-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:61e4b62d01504fe3f4329c1021a2781b1cdb5b5670c8eed1bf49f4edc2b28a73", size = 1091349, upload-time = "2026-08-07T19:50:43.817Z" },
+    { url = "https://files.pythonhosted.org/packages/70/b6/d92e999c8042f8a0fcb43805542d523b00224fee9f3aeb80eec52def923f/ezc3d-1.7.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:9fadacc2261c7e36255a48b4113305554284d7b0a308ddcc4054958d91e92d3b", size = 999779, upload-time = "2026-08-07T19:50:45.364Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/9c/13855a890d4b074fbc98b4008e0bb5524c09b803b0cfc05b38b9023b0f15/ezc3d-1.7.2-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:83fc8996e154e8c37e78e5a23141296965df61623e065bed421ea42a7bccbb76", size = 1225335, upload-time = "2026-08-07T19:50:46.947Z" },
+    { url = "https://files.pythonhosted.org/packages/23/e2/dd3874e8d562e5b45b63904a7af0aa1b157cf3c57e8ef93d80503a127e16/ezc3d-1.7.2-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:a1936078a90254f43e752733e8fbc1ce85fcde04bd2983e43b5a2e6a18d3f81d", size = 2293090, upload-time = "2026-08-07T19:50:48.807Z" },
+    { url = "https://files.pythonhosted.org/packages/65/58/850aab02d7a2fcf5b6e72f1680805ecf618ed72507413bd910e6ea9e6b4e/ezc3d-1.7.2-cp312-cp312-win32.whl", hash = "sha256:e886c58cf2d56b7a09e3ca40317f425b42371fdf1ea21e0314acbc72361f4c54", size = 737407, upload-time = "2026-08-07T19:50:50.288Z" },
+    { url = "https://files.pythonhosted.org/packages/60/89/bc9601bf499149c6acee854a19cd88b1a90240a8b0b87b1bda5c6eafec79/ezc3d-1.7.2-cp312-cp312-win_amd64.whl", hash = "sha256:a63fea3880b7d0648b7145d0852a857d96adf985f0b554865aef5b196b5a1192", size = 789382, upload-time = "2026-08-07T19:50:51.827Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/c2/bc08edc744a168b2826425dbfac6a9786b08684eef46ca5d4aac352f53b7/ezc3d-1.7.2-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:217b7ac279486d18b7375e2de29878bd5aeee50647c19152b78b72a6bd733eca", size = 1091073, upload-time = "2026-08-07T19:50:53.1Z" },
+    { url = "https://files.pythonhosted.org/packages/29/e2/3e302c69951fbc558064f5bfd3fc4a093b02b5a6e66d936717f2f99d19e4/ezc3d-1.7.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:ba3321e8ac613b4b2260998515619461edd4bec6c19b5b029de01c4821f2c022", size = 999663, upload-time = "2026-08-07T19:50:54.795Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/5c/d72ecc6dee588b150c2406938f2381efe5409f85143d533adb1142773683/ezc3d-1.7.2-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6488c125076e90ee65f3a9fafcd3d8e07250c4ca678cec0c77da8b3a05be4e0d", size = 1224551, upload-time = "2026-08-07T19:50:56.137Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/ce/dc552fa02f4ca2d684c3fa9f35c89fa551e13ac6819f85699cc3f2e99c9d/ezc3d-1.7.2-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:97a1f991cbfeb75887756a59fe113ca6142ea9aa3afefd086cd47e26bfd7a9ab", size = 2292567, upload-time = "2026-08-07T19:50:57.687Z" },
+    { url = "https://files.pythonhosted.org/packages/98/19/28eebde0945f648142f3bd4e050db4bb1bc97148831c4ebdce9d6b85fc63/ezc3d-1.7.2-cp313-cp313-win32.whl", hash = "sha256:7ad946079174d110327524e14190dcd28acb9be7cec088d8274a9a793b05bf28", size = 737099, upload-time = "2026-08-07T19:50:59.264Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/92/374534b1e005af58b9866a1022c27c83b976d88811dd0377f41fb733cb70/ezc3d-1.7.2-cp313-cp313-win_amd64.whl", hash = "sha256:7ebfa8d2e3de5741f3cabbcc16710937ca5c65a24c71ac8f6268bd63879b4c99", size = 789304, upload-time = "2026-08-07T19:51:00.759Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.32.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1202,6 +1225,9 @@ app = [
     { name = "pyqtgraph" },
     { name = "pyside6-essentials" },
 ]
+datasets = [
+    { name = "ezc3d" },
+]
 mediapipe = [
     { name = "mediapipe" },
 ]
@@ -1228,6 +1254,7 @@ qt = [
 [package.metadata]
 requires-dist = [
     { name = "certifi", specifier = ">=2025.1" },
+    { name = "ezc3d", marker = "extra == 'datasets'", specifier = ">=1.7,<2" },
     { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "matplotlib", specifier = ">=3.10,<4" },
     { name = "mediapipe", marker = "extra == 'mediapipe'", specifier = ">=1.0.1,<2" },
@@ -1247,7 +1274,7 @@ requires-dist = [
     { name = "tomli-w", specifier = ">=1.2,<2" },
     { name = "typer", specifier = ">=0.16,<1" },
 ]
-provides-extras = ["mediapipe", "opensim", "app"]
+provides-extras = ["mediapipe", "opensim", "app", "datasets"]
 
 [package.metadata.requires-dev]
 dev = [

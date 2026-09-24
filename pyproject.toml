@@ -45,6 +45,9 @@ app = [
     "pyqtgraph>=0.14,<0.15",
     "pyside6-essentials>=6.11.2,<7",
 ]
+datasets = [
+    "ezc3d>=1.7,<2",
+]
 
 [dependency-groups]
 dev = [

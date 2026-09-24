@@ -1,0 +1,90 @@
+# [REVIEW] new file (BACKLOG B29)
+# Public datasets used for validation. Every entry records the license we rely on and the exact
+# file checksums as published by the host on 2026-09-22. Files land under
+# $PTV_DATASETS_DIR/<name>/raw/ (default ~/ptvision-data/datasets); nothing here is ever committed.
+# `size` is the exact byte count reported by the host; a download that ends short is an error.
+
+[datasets.fukuchi2018]
+title = "A public data set of overground and treadmill walking kinematics and kinetics of healthy individuals"
+citation = "Fukuchi CA, Fukuchi RK, Duarte M. PeerJ 2018;6:e4640. doi:10.7717/peerj.4640"
+source = "https://figshare.com/articles/dataset/5722711"
+license = "CC BY 4.0"
+license_url = "https://creativecommons.org/licenses/by/4.0/"
+kind = "mocap"
+notes = "Use WBDSc3dWithGaitEvents.zip: the newer WBDSc3d.zip (v6) lacks the EVENT labels. 24 young + 27 older adults, overground and treadmill at several speeds."
+files = [
+  { url = "https://ndownloader.figshare.com/files/12403928", name = "WBDSc3dWithGaitEvents.zip", md5 = "ee7010dfcd3ee223f5e5d63dd369f124", size = 732934431, extract = true },
+  { url = "https://ndownloader.figshare.com/files/68504641", name = "WBDSinfo.csv", md5 = "35bc5abde86db7cd56532e2605adb138", size = 640894 },
+]
+
+[datasets.schreiber2019]
+title = "A multimodal dataset of human gait at different walking speeds established on injury-free adult participants"
+citation = "Schreiber C, Moissenet F. Sci Data 2019;6:111. doi:10.1038/s41597-019-0124-4"
+source = "https://figshare.com/articles/dataset/7734767"
+license = "CC BY 4.0"
+license_url = "https://creativecommons.org/licenses/by/4.0/"
+kind = "mocap"
+notes = "50 adults, five speed conditions (C1 slowest to C5 fastest), 52 markers, events and force plates."
+files = [
+  { url = "https://ndownloader.figshare.com/files/22295019", name = "schreiber2019.zip", md5 = "3b51aa30f2e138c3e2782fd6d3b7356f", size = 381392112, extract = true },
+  { url = "https://ndownloader.figshare.com/files/14870426", name = "Stored data details.pdf", md5 = "4a11da59247f8675b5e7dd97a09c6b1b", size = 724614 },
+]
+
+[datasets.vancriekinge2023]
+title = "A full-body motion capture gait dataset of 138 able-bodied adults across the life span and 50 stroke survivors"
+citation = "Van Criekinge T, et al. Sci Data 2023;10:852. doi:10.1038/s41597-023-02767-y"
+source = "https://doi.org/10.6084/m9.figshare.c.6503791"
+license = "CC0"
+license_url = "https://creativecommons.org/publicdomain/zero/1.0/"
+kind = "mocap"
+notes = "Plug-in-Gait c3d with Foot Strike / Foot Off events; healthy 21-86 y and post-stroke."
+files = [
+  { url = "https://ndownloader.figshare.com/files/42450060", name = "138_HealthyPiG.zip", md5 = "85235c73455d4df8434810d61517efbb", size = 463159769, extract = true },
+  { url = "https://ndownloader.figshare.com/files/42450069", name = "50_StrokePiG.zip", md5 = "71925450f3c058b145791de7951c8dc9", size = 316448944, extract = true },
+]
+
+[datasets.uiprmd]
+title = "UI-PRMD: University of Idaho Physical Rehabilitation Movements Data Set"
+citation = "Vakanski A, Jun HP, Paul D, Baker R. Data 2018;3(1):2. doi:10.3390/data3010002"
+source = "http://web.archive.org/web/20250424230129/https://www.webpages.uidaho.edu/ui-prmd/"
+license = "ODC Public Domain Dedication and License (PDDL) v1.0"
+license_url = "https://opendatacommons.org/licenses/pddl/1-0/"
+kind = "skeleton"
+notes = "Original site returns 404 (2026-09); files served from the Wayback Machine capture of 2024-07-07. No RGB video; Vicon and Kinect joint positions/angles, 10 movements incl. sit-to-stand (m05), correct and incorrect."
+files = [
+  { url = "https://web.archive.org/web/20240707205857if_/https://www.webpages.uidaho.edu/ui-prmd/Segmented%20Movements.zip", name = "Segmented Movements.zip", size = 206962745, extract = true },
+  { url = "https://web.archive.org/web/20240707205753if_/https://www.webpages.uidaho.edu/ui-prmd/Incorrect%20Segmented%20Movements.zip", name = "Incorrect Segmented Movements.zip", size = 213516724, extract = true },
+]
+
+[datasets.comfi]
+title = "COMFI: a multimodal dataset of human motion with force and video for industrial and everyday tasks"
+citation = "Zenodo record 18163808 (2025-12-01)"
+source = "https://zenodo.org/records/18163808"
+license = "CC BY 4.0"
+license_url = "https://creativecommons.org/licenses/by/4.0/"
+kind = "video+mocap+forces"
+notes = "18 participants, 24 tasks incl. walking and sit-to-stand; multi-view RGB 40 Hz, mocap, 6D force plates 1000 Hz. Video zips are large; pull `comfi` for metadata/forces/mocap and `comfi-video` for the six video archives."
+files = [
+  { url = "https://zenodo.org/api/records/18163808/files/metadata.zip/content", name = "metadata.zip", md5 = "d6f5efd4722139e98ccc8541bb7e0aaa", size = 73583, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/forces.zip/content", name = "forces.zip", md5 = "aa9a5800a399344ab82c0562166286d0", size = 1227356128, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/cam_params.zip/content", name = "cam_params.zip", md5 = "ad4af29016b28e3cb7a52687cf4ce12e", size = 3847889573, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/mocap.zip/content", name = "mocap.zip", md5 = "a8f178033fc5046aff4ea2f3907fe871", size = 10802744268, extract = true },
+]
+
+[datasets.comfi-video]
+title = "COMFI video archives"
+citation = "Zenodo record 18163808 (2025-12-01)"
+source = "https://zenodo.org/records/18163808"
+license = "CC BY 4.0"
+license_url = "https://creativecommons.org/licenses/by/4.0/"
+kind = "video"
+target = "comfi"
+notes = "Six archives, 56 GB total. Pull after checking metadata.zip for which participants/tasks are needed."
+files = [
+  { url = "https://zenodo.org/api/records/18163808/files/videos1.zip/content", name = "videos1.zip", md5 = "2219aa3b7afeda3738a376444ce0b40e", size = 6262182300, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/videos2.zip/content", name = "videos2.zip", md5 = "a717ba8818ce0a09fad5d363d959a47b", size = 9733089203, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/videos3.zip/content", name = "videos3.zip", md5 = "d3f210d771dd79e02c0e4598f26ddad3", size = 12047639265, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/videos4.zip/content", name = "videos4.zip", md5 = "cd00663bac46ef6fbfd8309999623dbf", size = 9412497686, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/videos5.zip/content", name = "videos5.zip", md5 = "1c1e5e1866a593fcbeebad8e055d568e", size = 9930892141, extract = true },
+  { url = "https://zenodo.org/api/records/18163808/files/videos6.zip/content", name = "videos6.zip", md5 = "cb099beeb33f4f19ce9d94dddd2d0f27", size = 9061935197, extract = true },
+]

@@ -573,5 +573,102 @@ def app_cmd(
     raise typer.Exit(app_main(source, protocol=protocol, out_dir=out, run_id=run))
 
 
+# ---------------------------------------------------------------------------------------------
+# Public datasets  [REVIEW] new (BACKLOG B29)
+# ---------------------------------------------------------------------------------------------
+datasets_app = typer.Typer(
+    help="Public validation datasets: pull, list, evaluate.", no_args_is_help=True
+)
+app.add_typer(datasets_app, name="datasets")
+
+
+@datasets_app.command("list")
+def datasets_list() -> None:
+    """Show known datasets, licenses, and what is on disk."""
+    from ptvision.datasets.registry import load_manifest, status
+
+    t = Table("name", "kind", "license", "files", "size GB", "dir")
+    for spec in load_manifest().values():
+        st = status(spec)
+        t.add_row(
+            str(st["name"]),
+            str(st["kind"]),
+            str(st["license"]),
+            str(st["files"]),
+            str(st["size_gb"]),
+            str(st["dir"]),
+        )
+    console.print(t)
+
+
+@datasets_app.command("pull")
+def datasets_pull(
+    names: Annotated[list[str], typer.Argument(help="Dataset names (see `ptv datasets list`).")],
+    verify: Annotated[bool, typer.Option(help="Verify md5 checksums.")] = True,
+) -> None:
+    """Download, verify, extract, and record provenance (license, checksums, date)."""
+    from ptvision.datasets.registry import load_manifest, pull
+
+    specs = load_manifest()
+    for name in names:
+        if name not in specs:
+            err.print(f"[red]unknown dataset {name!r}[/]; known: {', '.join(specs)}")
+            raise typer.Exit(2)
+    with _progress() as prog:
+        task = prog.add_task("starting", total=None)
+
+        def on_progress(label: str, done: int, total: int | None) -> None:
+            prog.update(task, description=label, completed=done, total=total)
+
+        for name in names:
+            res = pull(specs[name], verify=verify, progress=on_progress)
+            console.print(
+                f"[bold]{name}[/] ({res.spec.license}): downloaded {len(res.downloaded)}, "
+                f"already present {len(res.skipped)}, extracted {len(res.extracted)} "
+                f"-> {res.dirs.root}"
+            )
+
+
+@datasets_app.command("eval-gait")
+def datasets_eval_gait(
+    name: Annotated[str, typer.Argument(help="fukuchi2018 | schreiber2019 | vancriekinge2023")],
+    limit: Annotated[int | None, typer.Option(help="Only the first N trials.")] = None,
+    fps: Annotated[float, typer.Option(help="Virtual camera frame rate to resample to.")] = 30.0,
+    method: Annotated[str, typer.Option(help="Zeni method: coordinate | velocity")] = "coordinate",
+) -> None:
+    """Score our heel-strike / toe-off detector against a mocap dataset's labelled events."""
+    from ptvision.datasets.eval_gait import evaluate_dataset
+
+    with _progress() as prog:
+        task = prog.add_task("evaluating", total=None)
+
+        def on_progress(done: int, total: int | None) -> None:
+            prog.update(task, completed=done, total=total)
+
+        summary = evaluate_dataset(name, limit=limit, fps=fps, method=method, progress=on_progress)
+    console.print(summary.render(), markup=False)
+    console.print(f"[bold]written[/] {summary.out_dir}")
+
+
+@datasets_app.command("eval-sts")
+def datasets_eval_sts(
+    limit: Annotated[int | None, typer.Option(help="Only the first N episodes.")] = None,
+) -> None:
+    """Run the sit-to-stand segmenter on UI-PRMD m05 episodes (each is exactly one repetition)."""
+    from ptvision.datasets.uiprmd import evaluate_sts
+
+    results, out_dir = evaluate_sts(limit=limit)
+    n = len(results)
+    one = sum(1 for r in results if r.reps == 1)
+    console.print(
+        f"uiprmd m05: {n} episodes, exactly one rise detected in {one} ({one / max(n, 1):.0%})"
+    )
+    n_zero = sum(1 for r in results if r.reps == 0)
+    n_multi = sum(1 for r in results if r.reps > 1)
+    n_err = sum(1 for r in results if r.reps < 0)
+    console.print(f"  zero: {n_zero}  multiple: {n_multi}  errors: {n_err}")
+    console.print(f"[bold]written[/] {out_dir}")
+
+
 if __name__ == "__main__":
     app()

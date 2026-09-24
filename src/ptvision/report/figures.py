@@ -146,6 +146,7 @@ def fig_per_rep(ev: StsEvents, out: Path) -> Path:
     plt.close(fig)
     return out
 
+
 def fig_gait_events(ev: Any, out: Path) -> Path:
     """Heel and toe positions relative to the pelvis (anterior +) with detected events."""
     fps = ev.fps

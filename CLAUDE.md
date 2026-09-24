@@ -16,6 +16,7 @@ uv run ptv models pull --mode lightweight && uv run pytest    # full suite
 uv run ptv pose clip.mov                        # keypoints -> Parquet + overlay
 uv run ptv analyze clip.mov --protocol sts_5x   # clinical protocol -> report
 uv run ptv app [clip.mov | trial_dir]           # desktop viewer
+uv run ptv datasets pull schreiber2019 && uv run ptv datasets eval-gait schreiber2019   # public-data harness
 ```
 
 ## Conventions
@@ -30,7 +31,8 @@ uv run ptv app [clip.mov | trial_dir]           # desktop viewer
   Research-only assets (SMPL family, BEDLAM, GVHMR, HSMR/SKEL) and copyleft code should live only in `experiments/`.
 - Vendored code goes in `src/ptvision/_vendor/<project>/` with its LICENSE and a `PROVENANCE.md`
   (upstream commit, files, local modifications).
-- Decisions that are not obvious from the code go in `docs/decisions/NNNN-*.md` (ADRs).
+- Decisions that are not obvious from the code are explained in a comment at the point of use or in
+  the relevant doc under `docs/`.
 - Capture facts live in `capture.json` (immutable per trial); every processing run writes its own
   `runs/<run_id>/provenance.json`. Never overwrite a previous run.
 - Never commit patient video or identifiable data. Test fixtures come from BSD-licensed demo clips or
@@ -73,6 +75,5 @@ decision implemented, before a PT hands-on session, and after any dependency bum
 Slice 0 (pose CLI), Slice 1 (Five-Times Sit-to-Stand) and the desktop viewer (`ptv app`) are done.
 Next: confirm angle bands with the PT partner (B02), record real sit-to-stand clips (B03), the Windows
 M1 baseline check (B49), then Slice 2 gait timing (Zeni 2008 events), Slice 3 range of motion, Slice 4
-Timed Up and Go and longitudinal comparison. The approved plan lives at
-`~/.claude/plans/new-project-here-we-re-bubbly-treasure.md`; evidence for the slice order is in
-`docs/decisions/0005-metric-schema-wellness-framing.md`.
+Timed Up and Go and longitudinal comparison. The evidence for the slice order is summarised in
+`docs/research/README.md` and the reports it lists.
