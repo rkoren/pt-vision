@@ -70,7 +70,7 @@ Why: "Is this change real?" is the product; nothing open-source does it.
 What: `clinical/longitudinal.py`: `compare_runs(prev, cur)` with minimal detectable change thresholds from a
 `norms/mdc.csv`; `ptv compare --patient --episode`; report section "change since last visit"; warn when
 method versions differ between runs.
-Refs: ADR-0007.
+Refs: `docs/research/2026-09-02-viewer-design-review.md` (packaging section).
 Pick-up check: needs an MDC per metric from our own test-retest data or literature.
 
 ## Later
@@ -126,7 +126,7 @@ Halpe-26; use for cross-checks and as a fallback.
 ### B19 ViTPose++ backend
 Pose · Added 2026-09-01 · Effort M
 What: rtmlib `ViTPose` class with HF weights (verifiably Apache-2.0) as the license fallback for the
-Halpe-26 training-data concern (ADR-0002); needs a foot-keypoint strategy.
+Halpe-26 training-data concern (see the note in `pose/models.toml`); needs a foot-keypoint strategy.
 
 ### B20 GPU box support
 Infra · Added 2026-09-01 · Effort S
@@ -167,11 +167,6 @@ What: click a skeleton to make it the analysed subject; re-run downstream stages
 ### B28 Data-store index and clinician annotations
 Data · Added 2026-09-01 · Effort S–M
 What: SQLite index rebuilt from the JSON tree when listings slow down; free-text annotations per run.
-
-### B29 Validation harness on public datasets
-Validation · Added 2026-09-01 · Effort L
-What: OpenCap SimTK dataset (registration) replicating Horsak 2025's single-view design; Fukuchi 2018 and
-Van Criekinge 2023 for normative bands; UI-PRMD (public domain) for rehab exercises.
 
 ### B30 `experiments/` research project
 Research · Added 2026-09-01 · Effort L
@@ -274,16 +269,16 @@ What: CI artifact of the fixture clip's keypoints per platform; test asserting m
 
 ### B50 Revisit the project license before first public release
 Infra · Added 2026-09-06 · Effort S · Depends on: first release or first outside contributor
-Why: The Unlicense (ADR-0009) has no patent grant and no contributor terms; some corporate legal teams
+Why: The Unlicense has no patent grant and no contributor terms; some corporate legal teams
 reject public-domain dedications. Released snapshots stay public domain regardless of later changes.
 What: decide between keeping the Unlicense, 0BSD, or Apache-2.0 (patent grant, contributor clarity);
 update LICENSE, pyproject, NOTICE, README, CLAUDE.md, and add a CONTRIBUTING note.
-Pick-up check: has anything been published or contributed since ADR-0009?
+Pick-up check: has anything been published or contributed since the switch to the Unlicense (2026-09-05)?
 
 ### B51 Pose2Sim parity test is referenced by CI but does not exist
 Infra · Added 2026-09-06 · Effort S · Depends on: `opensim` extra installable in CI
 Why: `.github/workflows/ci.yml` has a manual `opensim-parity` job running
-`tests/integration/test_pose2sim_parity.py`, planned in ADR-0002 (compare our angles with
+`tests/integration/test_pose2sim_parity.py`, planned since the scaffold review (compare our angles with
 `Pose2Sim.common.points_to_angles` on a fixture) but never written. The job would fail if dispatched.
 What: write the parity test (skip when Pose2Sim is not importable), confirm the `opensim` extra resolves
 on ubuntu-24.04, run the job once by hand.
@@ -372,6 +367,64 @@ of the clip start/end, add a warning and a `truncated` flag on the metric; quali
 after the last movement).
 Pick-up check: apply the same idea to gait bouts that touch the clip edge.
 
+### B29b COMFI and OpenCap real-video validation
+Validation · Added 2026-09-22 · Effort M–L · Depends on: COMFI video decision (doc comment), OpenCap SimTK login
+Why: The mocap harness bounds the algorithms; only real video tests the pose model. COMFI (CC BY 4.0)
+has sit-to-stand with force plates and multi-view video; OpenCap (Apache 2.0) has walking and
+sit-to-stand video with force plates.
+What: COMFI loader (force-plate seat-off from vertical GRF, mocap events), run `ptv analyze` on the
+sagittal camera, `docs/validation/comfi-sts.md`; then the same for OpenCap gait once downloaded.
+Metadata, forces, mocap and camera parameters are on disk; the six video zips (56 GB) are not.
+Pick-up check: COMFI has no walking task (verified 2026-09-22); do not plan gait on it.
+
+### B61 Slow-walk and post-stroke event accuracy
+Clinical · Added 2026-09-22 · Effort M · Depends on: B29 harness (exists)
+Why: Below 0.8 m/s the detector's within-1-frame rate drops to 41–73 % (Schreiber C1/C2) and
+post-stroke trials produce extra detections (128 over 152 trials); these are the clinical speeds.
+What: evaluate at 60 fps; sub-frame refinement of the zero crossing (linear interpolation of the
+velocity sign change); a minimum-amplitude gate on the heel-relative excursion to suppress shuffle
+crossings; calibrate the per-method bias (heel strike ~1 frame early, toe-off ~1 frame late on
+Fukuchi). Re-run the harness after each change; the `events.csv` files make failures inspectable.
+Pick-up check: confirm the stroke extras are shuffles and not label gaps by viewing a few trials.
+
+### B62 Dataset loaders as PoseTrack sources for the app
+UI · Added 2026-09-22 · Effort S · Depends on: B29
+What: `ptv app` accepting a projected mocap trial (no video: draw the skeleton on a blank canvas) so
+dataset events can be stepped through visually; useful for B61 and for demos without video.
+
+### B63 Teammate onboarding: docs, `ptv doctor`, own-video walkthrough
+Docs/Infra · Added 2026-09-23 · Effort S–M
+Why: Teammates are joining. Today the README quickstart is thin, there is no contributor guide, the
+dataset commands are only mentioned in `CLAUDE.md`, and the only environment check is `ptv version`
+(no ffmpeg or weights check). The ffmpeg error message has no Windows instructions although the
+Windows log already names `winget install Gyan.FFmpeg`.
+What: rewrite `README.md` (install on Mac and Windows, weights, first run on the fixture clip, first
+run on your own phone clip with `--max-height`/`--height-m`/`--age`, where outputs go, the app);
+`CONTRIBUTING.md` (branch workflow, `[REVIEW]` tags, backlog practice, tests and lint, never commit
+video, `~/ptvision-data` layout); `docs/datasets.md` (each dataset: license, size, command, what the
+eval reports, manual-fetch items: OpenCap SimTK login, COMFI video zips, KIMORE email); `ptv doctor`
+(python/uv, ffmpeg+ffprobe versions, weights present per mode, ORT providers, Qt importable, data and
+dataset dirs, disk free) with a copy-pasteable fix per failure; Windows text in `require_ffmpeg`;
+fix the stale `ptv app --protocol` help (gait_sagittal is missing).
+Pick-up check: if B46 (`uv tool install`) has landed, the install section changes shape.
+
+### B64 Subject details and analysis options in the app
+UI · Added 2026-09-23 · Effort S
+Why: `ptv app` runs a protocol with no way to enter height, age, sex, or `--max-height`, so gait
+speed and step length come out unavailable and norms are not applied when a teammate drops their own
+walking clip in; the CLI has all of these. The first thing a new user tries is the app.
+What: a small form on the drop page (height m, age, sex, max detection height, near side override)
+that feeds `AnalyzeOptions`; remember the last values with QSettings; show the same fields when
+re-running a trial with a different protocol. Overlaps B42 (pose-only polish) and B40 (recent list).
+
+### B49 Windows M1 baseline check
+Portability · Added 2026-09-03 (entry written 2026-09-23) · Effort S · User-side
+Why: `CLAUDE.md` and `docs/portability/windows-log.md` both reference this and the M1 row of the log
+is still empty; teammates on Windows are the likeliest to hit install problems first.
+What: run the checklist in the Windows log on the RTX 5070 Ti box from a clean clone, fill the M1 row,
+and turn every friction point into a backlog entry. Do it after B63 so the README it tests is the one
+teammates will read.
+
 ### B40 Recent-trials list on the drop page
 UI · Added 2026-09-02 · Effort S
 What: QSettings-backed list of recently opened trials.
@@ -384,6 +437,11 @@ What: QSettings-backed list of recently opened trials.
 
 ## Done
 
+- 2026-09-22 B29 (part 1) Public-dataset harness: `ptv datasets pull|list|eval-gait|eval-sts`, manifest
+  with checksums and licenses, c3d reader, virtual side-camera projection, Zeni event scoring on
+  Schreiber 2019 (1,143 trials), Van Criekinge 2023 (606 incl. 152 stroke), Fukuchi 2018 (1,969),
+  UI-PRMD sit-to-stand (200/200 episodes). Results in `docs/validation/mocap-gait-events.md`.
+  Found and fixed: treadmill direction inference, first-frame events, slow-walk bout threshold.
 - 2026-09-06 B04 + B05 Slice 2 gait (`gait_sagittal`): Zeni 2008 heel-strike/toe-off events, walking bouts,
   steady-state cycles, cadence, stance/swing/double support, step- and stance-time asymmetry with an error
   floor, gait speed and bout-mean step/stride length in metres from subject height (Sports2D-style height

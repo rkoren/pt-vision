@@ -217,6 +217,7 @@ def synth_video(path: Path, seconds: float, fps: float, size: str = "854x480") -
     )
     return path
 
+
 @dataclass
 class GaitTimeline:
     fps: float = 30.0

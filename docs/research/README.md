@@ -1,7 +1,7 @@
 # Research notes
 
 Raw reports produced during planning by research and design-review agents, saved for traceability of the
-architecture decision records (`docs/decisions/`) and the backlog. They are reproduced as delivered,
+code comments and the backlog. They are reproduced as delivered,
 lightly formatted, with no edits to their claims.
 
 How they were produced: each agent worked from a scoped brief with the instruction to verify against

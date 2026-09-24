@@ -2,7 +2,7 @@
 # sha256 values are of the downloaded archive; empty means "not yet pinned" (filled by `ptv models pull`).
 # All weights: MMPose project, Apache-2.0 (https://github.com/open-mmlab/mmpose).
 # Training-data note: Halpe-26 checkpoints are trained on the "body7" dataset mix, which includes the
-# Halpe dataset (no license file upstream). Documented as a residual risk in docs/decisions/0002.
+# Halpe dataset (no license file upstream). Residual licensing risk; see NOTICE and BACKLOG.md.
 
 [models.yolox_tiny]
 kind = "det"

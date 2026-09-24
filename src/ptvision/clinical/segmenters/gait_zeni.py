@@ -43,7 +43,10 @@ class GaitParams:
     drop_edge_cycles: int = 1  # cycles dropped at each end of every bout
     edge_margin_frac: float = 0.05  # events with the pelvis this close to a frame edge are dropped
     bout_min_s: float = 1.0
-    bout_speed_frac: float = 0.15  # pelvis speed threshold, body heights per second (~0.25 m/s)
+    # pelvis speed threshold in body heights per second (~0.25 m/s); <= 0 treats the whole clip
+    # as one bout (treadmill / mocap)
+    bout_speed_frac: float = 0.15
+    edge_peaks: bool = True  # allow heel strike / toe-off on the first or last frame of a bout
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GaitParams:
@@ -189,8 +192,35 @@ def _body_height_px(track: PoseTrack) -> float:
     return h if np.isfinite(h) and h > 0 else 400.0
 
 
-def detect_bouts(hip_x: np.ndarray, fps: float, height_px: float, p: GaitParams) -> list[Bout]:
-    """Walking bouts from pelvis horizontal velocity; one direction per bout."""
+def infer_direction(hip_x: np.ndarray, heel_x: np.ndarray) -> int:
+    """+1 if walking toward image-right. Uses the pelvis trend when it translates (overground);
+    otherwise the skew of the heel's velocity relative to the pelvis (treadmill): forward swing is
+    about twice as fast as the backward drift during stance."""
+    ok = ~np.isnan(hip_x)
+    if ok.sum() > 10:
+        travel = float(np.nanmax(hip_x) - np.nanmin(hip_x))
+        slope = np.polyfit(np.flatnonzero(ok), hip_x[ok], 1)[0]
+        body = float(np.nanmax(heel_x) - np.nanmin(heel_x)) or 1.0
+        if travel > 0.5 * body:
+            return 1 if slope > 0 else -1
+    rel = heel_x - hip_x
+    v = np.diff(rel)
+    v = v[~np.isnan(v)]
+    if v.size < 5:
+        return 1
+    # relative to the pelvis the heel swings forward about twice as fast as it drifts back in stance
+    return 1 if (np.nanpercentile(v, 95) + np.nanpercentile(v, 5)) >= 0 else -1
+
+
+def detect_bouts(
+    hip_x: np.ndarray, fps: float, height_px: float, p: GaitParams, heel_x: np.ndarray | None = None
+) -> list[Bout]:
+    """Walking bouts from pelvis horizontal velocity; one direction per bout.
+    With `bout_speed_frac <= 0` the whole clip is a single bout (treadmill or stationary-camera
+    mocap, where the pelvis need not translate)."""
+    if p.bout_speed_frac <= 0:
+        d = infer_direction(hip_x, heel_x) if heel_x is not None else 1
+        return [Bout(0, 0, len(hip_x), d)]
     v = derivative(hip_x, fps)
     thr = p.bout_speed_frac * height_px
     moving = np.abs(v) > thr
@@ -218,8 +248,28 @@ def _peaks(sig: np.ndarray, fps: float, p: GaitParams, *, negate: bool) -> np.nd
     if rng <= 0:
         return np.array([], dtype=int)
     dist = max(2, round(0.7 * p.min_stride_s * fps))
-    idx, _ = find_peaks(s, distance=dist, prominence=p.prominence_frac * rng)
+    if p.edge_peaks:
+        padded = np.concatenate([[s[0] - rng], s, [s[-1] - rng]])
+        idx, _ = find_peaks(padded, distance=dist, prominence=p.prominence_frac * rng)
+        idx = idx - 1
+        idx = idx[(idx >= 0) & (idx < len(s))]
+    else:
+        idx, _ = find_peaks(s, distance=dist, prominence=p.prominence_frac * rng)
     return np.asarray(idx, dtype=int)
+
+
+def _merge_edge_peaks(primary: np.ndarray, peaks: np.ndarray, edge: int, n: int) -> np.ndarray:
+    """Add positional peaks that lie within `edge` frames of either end and are at least `edge`
+    frames from every primary event."""
+    extra = [
+        int(q)
+        for q in peaks
+        if (q < edge or q >= n - edge)
+        and (primary.size == 0 or np.min(np.abs(primary - q)) >= edge)
+    ]
+    if not extra:
+        return primary
+    return np.array(sorted(set(primary.tolist()) | set(extra)), dtype=int)
 
 
 def _zero_crossings(sig: np.ndarray, fps: float, p: GaitParams, *, falling: bool) -> np.ndarray:
@@ -315,7 +365,12 @@ def segment_gait_track(
     n = track.n_frames
     hip_x = _fill(track.keypoint("Hip")[:, 0], max_gap=round(fps))
     height_px = _body_height_px(track)
-    bouts = detect_bouts(hip_x, fps, height_px, p)
+    heel_ref = None
+    for nm in ("LHeel", "RHeel", "LAnkle", "RAnkle"):
+        if lay.has(nm) and not np.isnan(track.keypoint(nm)[:, 0]).all():
+            heel_ref = _fill(track.keypoint(nm)[:, 0], max_gap=round(fps))
+            break
+    bouts = detect_bouts(hip_x, fps, height_px, p, heel_x=heel_ref)
     warnings: list[str] = []
     if not bouts:
         warnings.append("no walking bout detected (pelvis never moved faster than the threshold)")
@@ -337,6 +392,16 @@ def segment_gait_track(
             if p.method == "velocity":
                 hs_idx = _zero_crossings(heel_a, fps, p, falling=True)
                 to_idx = _zero_crossings(toe_a, fps, p, falling=False)
+                if p.edge_peaks:
+                    # a zero crossing cannot exist on the first/last frames; take positional
+                    # extrema there (coordinate method) when no velocity event is nearby
+                    edge = max(2, round(0.7 * p.min_stride_s * fps))
+                    hs_idx = _merge_edge_peaks(
+                        hs_idx, _peaks(heel_a, fps, p, negate=False), edge, len(heel_a)
+                    )
+                    to_idx = _merge_edge_peaks(
+                        to_idx, _peaks(toe_a, fps, p, negate=True), edge, len(toe_a)
+                    )
             else:
                 hs_idx = _peaks(heel_a, fps, p, negate=False)
                 to_idx = _peaks(toe_a, fps, p, negate=True)
