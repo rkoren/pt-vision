@@ -1,0 +1,10 @@
+# Normalize text to LF on every platform so Windows checkouts don't fail `ruff format --check`
+# and diffs stay clean across Mac/Windows contributors. Binary fixtures are marked so git never touches them.
+* text=auto eol=lf
+*.mp4 binary
+*.mov binary
+*.png binary
+*.jpg binary
+*.parquet binary
+*.onnx binary
+*.zip binary

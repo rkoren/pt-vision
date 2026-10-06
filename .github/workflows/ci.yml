@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_QPA_PLATFORM: offscreen
+  PTV_MODEL_DIR: ${{ github.workspace }}/.ptv-models
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15]  # Ubuntu and Windows return later; only macOS is checked for now
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: System deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - run: uv sync --extra app --extra datasets --frozen
+      - run: uv run ptv version
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv run pytest -m "not model"
+
+  model-tests:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15]  # Ubuntu and Windows return later; only macOS is checked for now
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: System deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - run: uv sync --extra app --extra datasets --frozen
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PTV_MODEL_DIR }}
+          key: ptv-models-${{ hashFiles('src/ptvision/pose/models.toml') }}
+      - run: uv run ptv models pull --mode lightweight
+      - run: uv run pytest -m model

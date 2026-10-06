@@ -1,0 +1,83 @@
+[protocol]
+id = "sts_30s"
+version = "0.1.0"
+name = "30-Second Chair Stand"
+family = "sit_to_stand"
+summary = "Number of full stands completed in 30 seconds from a seated position, arms crossed."
+
+[capture]
+view = "sagittal"
+distance_m = 3.0
+camera_height_m = 0.8
+min_fps = 24
+duration_s = [25, 180]
+required_keypoints = ["LHip", "RHip", "LKnee", "RKnee", "LAnkle", "RAnkle", "LShoulder", "RShoulder", "Neck", "Hip"]
+instructions = """Same setup as 5xSTS. On 'go', stand fully and sit back down as many times as possible in 30 s.
+Count starts at the first seat-off unless a start time is given."""
+
+[pose]
+backend = "rtmlib"
+model = "body_with_feet"
+
+[preprocess]
+score_threshold = 0.3
+interp_max_gap_s = 0.3
+filter_type = "butterworth"
+filter_order = 4
+filter_cutoff_hz = 6.0
+segment_signal_cutoff_hz = 3.0
+
+[segmenter]
+name = "sts_velocity_threshold"
+version = "0.1.0"
+n_reps_expected = -1               # unknown; count within the window
+start_rule = "first_seat_off"
+end_rule = "window"
+window_s = 30.0
+partial_rule = "count_if_past_halfway"
+v_seated = 0.25
+v_standing = 0.25
+peak_height_min = 0.7
+peak_prominence_min = 0.5
+min_rep_s = 0.6
+lean_velocity_deg_s = 10.0
+
+[[metrics]]
+name = "chair_stand_count_30s"
+primary = true
+
+[[metrics]]
+name = "sts_rise_time"
+
+[[metrics]]
+name = "sts_cycle_time"
+
+[[metrics]]
+name = "trunk_lean_at_seat_off"
+
+# Angle bands used to colour the skeleton (1 = in range, 0.5 = at the warn edge, 0 = beyond).
+# Provisional values from healthy sit-to-stand descriptions; confirm with the PT partner.
+[[rules]]
+angle = "trunk_lean"
+label = "Trunk forward lean"
+ok = [0, 40]
+warn = [-10, 55]
+note = "provisional, confirm with PT"
+
+[[rules]]
+angle = "knee_flexion"
+label = "Knee flexion"
+ok = [0, 110]
+warn = [0, 130]
+note = "provisional, confirm with PT"
+
+[[rules]]
+angle = "hip_flexion"
+label = "Hip flexion"
+ok = [0, 120]
+warn = [0, 140]
+note = "provisional, confirm with PT"
+
+[report]
+template = "sts.html.j2"
+angles = ["knee_flexion", "hip_flexion", "trunk_lean"]

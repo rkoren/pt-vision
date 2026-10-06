@@ -1,0 +1,4 @@
+age_lo,age_hi,sex,statistic,value,units,n
+60,69,all,mean,11.4,s,
+70,79,all,mean,12.6,s,
+80,89,all,mean,14.8,s,

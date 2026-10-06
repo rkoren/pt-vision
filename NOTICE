@@ -1,0 +1,34 @@
+ptvision
+
+The original code in this repository is released into the public domain under the Unlicense
+(see LICENSE). The third-party code listed below is included or adapted under its own license,
+which remains in force and is not affected by that dedication:
+
+- Pose2Sim (https://github.com/perfanalytics/pose2sim), BSD 3-Clause License,
+  Copyright (c) 2022, perfanalytics / David Pagnon.
+  Vendored pieces (skeleton definitions, joint-angle table and angle functions, TRC/MOT writers,
+  Hampel filter, person tracker) live in src/ptvision/_vendor/pose2sim/ with their license and
+  a PROVENANCE.md recording the upstream commit.
+
+- opencap-processing (https://github.com/opencap-org/opencap-processing), Apache License 2.0,
+  Copyright Stanford University. The sit-to-stand and gait segmentation algorithms in
+  src/ptvision/clinical/segmenters/ are adapted from ActivityAnalyses/sts_analysis.py and
+  ActivityAnalyses/gait_analysis.py.
+
+- rtmlib (https://github.com/Tau-J/rtmlib), Apache License 2.0, used as a dependency for
+  RTMPose/YOLOX ONNX inference. Model weights are downloaded from the MMPose project
+  (https://github.com/open-mmlab/mmpose, Apache License 2.0).
+
+- PySide6 / Qt for Python (https://www.qt.io/qt-for-python), LGPL-3.0, used by the optional desktop
+  app (`app` extra) and dynamically linked as shipped in the PySide6-Essentials wheels. Qt source is
+  available from https://download.qt.io/; a distributed application must keep Qt as replaceable shared
+  libraries and include the LGPL text.
+
+- pyqtgraph (https://www.pyqtgraph.org/), MIT License, used for the desktop app's timeline plot.
+
+Model weights and their training data
+
+- The RTMPose Halpe-26 weights were trained on the Halpe dataset (26 keypoints incl. feet), which
+  publishes no license file of its own; the model code and weights are Apache 2.0 via MMPose. We
+  treat this as a residual licensing risk for commercial use and will revisit it before any public
+  release (see the note in src/ptvision/pose/models.toml).

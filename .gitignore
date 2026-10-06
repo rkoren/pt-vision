@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project outputs (patient video or derived data)
+ptv_out/
+ptvision-data/
+*.mov
+*.MOV
+*.mp4
+!tests/fixtures/*.mp4
+!src/ptvision/samples/*.mp4
+*.onnx
+*.zip
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Claude stuff
+decisions
+
+# CI model-weight cache (PTV_MODEL_DIR in .github/workflows/ci.yml)
+.ptv-models/
+
+# local planning
+BACKLOG.md
+.ipynb_checkpoints/
