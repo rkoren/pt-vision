@@ -7,21 +7,34 @@
         capture.json  source/<original>  video/cam0.mp4  pose/cam0.parquet
         runs/<run_id>/{provenance.json, overlay.mp4, ...}  latest.json
 
-Anonymous trials (no patient) use the same trial layout under an arbitrary output directory.
+Anonymous trials use the same layout under arbitrary output directory
 """
 
 from __future__ import annotations
 
 import platform
+import secrets
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ptvision._version import __version__
-from ptvision.data.ids import new_id, now_iso
-from ptvision.data.models import Capture, Episode, Patient, RunProvenance, Visit
-from ptvision.io.jsonio import read_json, write_json
+from ptvision.files import read_json, write_json
+from ptvision.trials.models import Capture, Episode, Patient, RunProvenance, Visit
+
+# ---- ids ---------------------------------------------------------------------------------
+
+
+def new_id(prefix: str, when: datetime | None = None) -> str:
+    """Sortable, human-readable id like `T-20260901-140322-a3f9`."""
+    when = when or datetime.now(UTC)
+    return f"{prefix}-{when.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
+
+
+def now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def git_sha(cwd: Path | None = None) -> str | None:

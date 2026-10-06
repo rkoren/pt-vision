@@ -1,4 +1,4 @@
-# [REVIEW] new file (BACKLOG B29)
+# [REVIEW] new file
 """Minimal c3d access via ezc3d (MIT): marker trajectories in metres plus labelled events."""
 
 from __future__ import annotations

@@ -1,9 +1,4 @@
-"""Keypoint layouts and remapping between them.
-
-Halpe-26 is the canonical internal layout: COCO-17 body plus head, neck, pelvis ("Hip") and
-six foot points (big toe, small toe, heel per side). The heel and toe points are what gait
-event detection needs, which is why COCO-17-only models are not used.
-"""
+"""Keypoint layouts and remapping between them"""
 
 from __future__ import annotations
 
@@ -41,7 +36,6 @@ class KeypointLayout:
         return [(p, i) for i, p in enumerate(self.parents) if p >= 0]
 
     def mirror(self, name: str) -> str:
-        """Return the contralateral keypoint name (or the same name for midline points)."""
         for a, b in self.left_right_pairs:
             if self.names[a] == name:
                 return self.names[b]
@@ -51,7 +45,7 @@ class KeypointLayout:
 
 
 def _halpe26() -> KeypointLayout:
-    # Index order as emitted by RTMPose Halpe-26 checkpoints (MMPose halpe26 metainfo).
+    # Index order using RTMPose Halpe-26 checkpoints
     names = (
         "Nose",
         "LEye",
@@ -86,7 +80,7 @@ def _halpe26() -> KeypointLayout:
         assert idx[name] == kp_id, f"Halpe-26 index mismatch for {name}: {idx[name]} vs {kp_id}"
         if parent is not None:
             parents[kp_id] = idx[parent]
-    # Eyes and ears are not in Pose2Sim's kinematic tree; connect them COCO-style for drawing.
+    # Add eyes and ears
     parents[idx["LEye"]] = idx["Nose"]
     parents[idx["REye"]] = idx["Nose"]
     parents[idx["LEar"]] = idx["LEye"]
@@ -114,8 +108,7 @@ HALPE26 = _halpe26()
 
 LAYOUTS: dict[str, KeypointLayout] = {HALPE26.name: HALPE26}
 
-# Midline points that can be synthesised as the midpoint of two others when a source layout
-# lacks them.
+# Midline point backups
 _DERIVED_MIDPOINTS: dict[str, tuple[str, str]] = {
     "Hip": ("LHip", "RHip"),
     "Neck": ("LShoulder", "RShoulder"),
@@ -130,12 +123,7 @@ def remap(
     *,
     derive_midpoints: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Reorder keypoints from `src` layout to `dst` layout by name.
-
-    Works on any leading shape: coords (..., K_src, D), score (..., K_src). Missing keypoints
-    become NaN with score 0. Midline points absent from the source (pelvis, neck) are derived
-    as midpoints when both parents exist.
-    """
+    """Reorder keypoints from `src` layout to `dst` layout by name"""
     if coords.shape[-2] != src.n or score.shape[-1] != src.n:
         raise ValueError(f"coords/score do not match layout {src.name} ({src.n} keypoints)")
     lead = coords.shape[:-2]

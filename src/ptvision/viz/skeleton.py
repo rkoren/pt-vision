@@ -1,4 +1,4 @@
-"""Named body segments mapped onto Halpe-26 edges, and the one drawing loop both renderers use."""
+"""Segments mapped onto Halpe-26 edges and drawn"""
 
 from __future__ import annotations
 

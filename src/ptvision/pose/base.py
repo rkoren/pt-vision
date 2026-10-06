@@ -1,4 +1,4 @@
-"""PoseBackend protocol and model provenance record."""
+"""PoseBackend"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from ptvision.pose.track import PoseTrack
 
 
 class PoseModelInfo(BaseModel):
-    """Everything needed to reproduce a pose run, written into run provenance."""
+    """Everything needed to reproduce a pose run"""
 
     backend: str  # "rtmlib", "mediapipe"
     model_class: str  # "BodyWithFeet"
@@ -35,6 +35,8 @@ class PoseModelInfo(BaseModel):
 
 
 ProgressFn = Callable[[int, int | None], None]
+# (frame index, BGR frame, keypoints (N,K,2), scores (N,K)): live preview while processing
+PreviewFn = Callable[[int, np.ndarray, np.ndarray, np.ndarray], None]
 
 
 @runtime_checkable
@@ -50,4 +52,5 @@ class PoseBackend(Protocol):
         image_size: tuple[int, int],
         n_frames: int | None = None,
         progress: ProgressFn | None = None,
+        preview: PreviewFn | None = None,
     ) -> PoseTrack: ...

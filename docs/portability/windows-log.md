@@ -38,7 +38,7 @@ anything that needed a workaround. Every friction point becomes a backlog entry.
 | M3 | Slice 2 gait done | new segmenter and scaling code paths |
 | M4 | Before the first PT partner hands-on session | rehearsal of exactly what they will do |
 | M5 | Distribution route (B46 `uv tool install`, later B17 bundles) | installer scripts, SmartScreen, bundle size |
-| any | a dependency added or bumped, or changes in `io/video.py`, `pose/models.py`, `app/` | these are where platform differences live |
+| any | a dependency added or bumped, or changes in `video.py`, `pose/models.py`, `app/` | these are where platform differences live |
 
 ## Log
 

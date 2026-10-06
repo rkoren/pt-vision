@@ -1,4 +1,4 @@
-# [REVIEW] new file (BACKLOG B29)
+# [REVIEW] new file
 # Public datasets used for validation. Every entry records the license we rely on and the exact
 # file checksums as published by the host on 2026-09-22. Files land under
 # $PTV_DATASETS_DIR/<name>/raw/ (default ~/ptvision-data/datasets); nothing here is ever committed.
@@ -47,7 +47,7 @@ files = [
 title = "UI-PRMD: University of Idaho Physical Rehabilitation Movements Data Set"
 citation = "Vakanski A, Jun HP, Paul D, Baker R. Data 2018;3(1):2. doi:10.3390/data3010002"
 source = "http://web.archive.org/web/20250424230129/https://www.webpages.uidaho.edu/ui-prmd/"
-license = "ODC Public Domain Dedication and License (PDDL) v1.0"
+license = "PDDL v1.0"
 license_url = "https://opendatacommons.org/licenses/pddl/1-0/"
 kind = "skeleton"
 notes = "Original site returns 404 (2026-09); files served from the Wayback Machine capture of 2024-07-07. No RGB video; Vicon and Kinect joint positions/angles, 10 movements incl. sit-to-stand (m05), correct and incorrect."

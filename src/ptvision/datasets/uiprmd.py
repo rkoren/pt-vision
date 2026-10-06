@@ -1,4 +1,4 @@
-# [REVIEW] new file (BACKLOG B29)
+# [REVIEW] new file
 """UI-PRMD loader (Vicon marker positions, 100 Hz, 39 Plug-in-Gait markers, mm) and a sit-to-stand
 check: every segmented episode of movement m05 is exactly one sit-to-stand, correct or incorrect.
 

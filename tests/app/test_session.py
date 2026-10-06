@@ -75,38 +75,17 @@ def test_events_from_dict_shapes() -> None:
     assert events_from_dict({"segmenter": "other"}) == ([], [], None)
 
 
-def test_events_from_dict_gait() -> None:
-    d = {
-        "segmenter": "gait_zeni",
-        "steady_window": [30, 120],
-        "events": [
-            {"frame": 30, "side": "left", "kind": "hs", "bout": 0},
-            {"frame": 50, "side": "left", "kind": "to", "bout": 0},
-        ],
-        "cycles": [
-            {
-                "side": "left",
-                "bout": 0,
-                "hs": 30,
-                "to": 50,
-                "next_hs": 63,
-                "contra_hs": 46,
-                "contra_to": 34,
-                "steady": True,
-            },
-            {
-                "side": "right",
-                "bout": 0,
-                "hs": 46,
-                "to": 66,
-                "next_hs": 79,
-                "contra_hs": 63,
-                "contra_to": 50,
-                "steady": False,
-            },
-        ],
-    }
-    markers, phases, window = events_from_dict(d)
-    assert [m.label for m in markers] == ["heel strike L", "toe-off L"]
-    assert [(p.kind, p.start, p.end) for p in phases] == [("stance", 30, 50), ("swing", 50, 63)]
-    assert window == (30, 120)
+def test_first_present_frame_skips_empty_lead_in(synthetic_trial) -> None:
+    # [REVIEW] viewer refinement
+
+    from ptvision.app.session import TrialSession
+
+    s = TrialSession.load(synthetic_trial.trial_dir, None)
+    if s.test_window is not None:
+        assert s.first_present_frame == s.test_window[0]
+        s.test_window = None
+    assert s.first_present_frame == 0
+    s.track.score[:7, s.primary_slot] = 0.0
+    assert s.first_present_frame == 7
+    s.track.score[7:12, s.primary_slot, 5:] = 0.0  # only a few joints for a while: not "whole"
+    assert s.first_present_frame == 12

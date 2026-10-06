@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("PTV_HARD_EXIT", "0")  # CLI commands must return to the test runner
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

@@ -1,7 +1,6 @@
 from ptvision.clinical.metrics.base import Metric
 from ptvision.quality.checks import QualityCheck, QualityReport
-from ptvision.report.build import render_html
-from ptvision.report.schema import ReportBundle
+from ptvision.report.bundle import ReportBundle, render_html
 
 
 def test_render_minimal_bundle() -> None:

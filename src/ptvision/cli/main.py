@@ -2,48 +2,55 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
-from rich.console import Console
-from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
 from ptvision._version import __version__
+from ptvision.cli.common import console, err, progress_bar, subject_from_flags
 from ptvision.config import settings
 
 if TYPE_CHECKING:
-    from ptvision.data.models import Subject
-    from ptvision.data.store import DataStore
+    pass
 
 app = typer.Typer(
     name="ptv",
     help=(
-        "ptvision: measurement tools for physical therapists from ordinary video. "
-        "Not a medical device."
+        "ptvision: measurement tools for physical therapists"
     ),
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
 models_app = typer.Typer(help="Manage ONNX model weights.", no_args_is_help=True)
 app.add_typer(models_app, name="models")
-console = Console()
-err = Console(stderr=True)
 
 
-def _progress() -> Progress:
-    return Progress(
-        TextColumn("[bold]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-        transient=True,
-    )
+def _register_subcommands() -> None:
+    """Sub-apps that live in their own modules (imported here to avoid import cycles)"""
+    from ptvision.cli.datasets import datasets_app
+    from ptvision.cli.store import patient_app, report, visit_app
+
+    app.add_typer(datasets_app, name="datasets")
+    app.add_typer(patient_app, name="patient")
+    app.add_typer(visit_app, name="visit")
+    app.command("report")(report)
+
+
+def _finish_after_inference(code: int = 0) -> None:
+    """leave the process without interpreter teardown once inference has run"""
+    if os.environ.get("PTV_HARD_EXIT", "1") == "0":
+        return
+    console.file.flush()
+    err.file.flush()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
 
 
 @app.callback()
@@ -53,7 +60,7 @@ def _root() -> None:
 
 @app.command()
 def version() -> None:
-    """Print version and environment summary."""
+    """Print version and environment summary"""
     import onnxruntime as ort
 
     s = settings()
@@ -72,7 +79,7 @@ def models_pull(
         str, typer.Option(help="lightweight | balanced | performance | all")
     ] = "balanced",
 ) -> None:
-    """Download and verify weights for a mode."""
+    """Download and verify weights"""
     from ptvision.pose.models import MODE_NAMES, ModelManager
 
     mm = ModelManager()
@@ -84,14 +91,15 @@ def models_pull(
             console.print(
                 f"[green]ok[/] {m:12s} {r.spec.name:22s} "
                 f"{r.onnx_path.stat().st_size / 1e6:6.1f} MB  {pinned}  "
-                f"archive sha256 {r.archive_sha256}"
+                f"archive sha256 {r.archive_sha256}",
+                soft_wrap=True,
             )
-    console.print(f"models_dir {mm.models_dir}")
+    console.print(f"models_dir {mm.models_dir}", soft_wrap=True)
 
 
 @models_app.command("list")
 def models_list() -> None:
-    """Show which weights are cached."""
+    """Show which weights are cached"""
     from ptvision.pose.models import ModelManager
 
     mm = ModelManager()
@@ -114,7 +122,7 @@ def pose(
     video: Annotated[
         Path,
         typer.Argument(
-            exists=True, help="Source video (any format ffmpeg reads) or trial directory."
+            exists=True, help="Source video (any format ffmpeg reads) or trial directory"
         ),
     ],
     out: Annotated[
@@ -128,16 +136,20 @@ def pose(
         int | None, typer.Option(help="Run the detector every N frames.")
     ] = None,
     max_height: Annotated[
-        int | None, typer.Option(help="Downscale to this height during ingest.")
+        int | None,
+        typer.Option(
+            help="Cap the shorter side of the frame during ingest (1080 turns 4K into 1920x1080 "
+            "or 1080x1920)."
+        ),
     ] = None,
     overlay: Annotated[bool, typer.Option(help="Render an overlay video.")] = True,
     reuse: Annotated[
         bool, typer.Option(help="Reuse cached keypoints when the model matches.")
     ] = True,
 ) -> None:
-    """Extract Halpe-26 keypoints from a video into Parquet (+ confidence-colored overlay video)."""
-    from ptvision.io.video import require_ffmpeg
+    """Extract Halpe-26 keypoints from a video into Parquet (+ confidence-colored overlay video)"""
     from ptvision.pipeline import AnalyzeOptions, pose_only
+    from ptvision.video import require_ffmpeg
 
     require_ffmpeg()
     opts = AnalyzeOptions(
@@ -150,7 +162,7 @@ def pose(
         overlay=overlay,
         reuse_pose=reuse,
     )
-    with _progress() as prog:
+    with progress_bar() as prog:
         task = prog.add_task("starting", total=None)
 
         def on_progress(done: int, total: int | None) -> None:
@@ -163,7 +175,7 @@ def pose(
 
     capture = result.run.path.parent.parent  # trial dir
     cap = (
-        __import__("ptvision.data.store", fromlist=["TrialDir"])
+        __import__("ptvision.trials.store", fromlist=["TrialDir"])
         .TrialDir(capture)
         .read_capture()
         .cameras[0]
@@ -197,6 +209,7 @@ def pose(
     if result.overlay_path:
         console.print(f"      {result.overlay_path}")
     console.print(f"      {result.run.provenance_path}")
+    _finish_after_inference()
 
 
 @app.command()
@@ -210,8 +223,8 @@ def bench(
     ] = "1,4",
 ) -> None:
     """Time pose extraction per (mode, device, det_frequency) and print a Markdown table."""
-    from ptvision.io.video import iter_frames, probe
     from ptvision.pose.rtmlib_backend import RtmlibBackend
+    from ptvision.video import iter_frames, probe
 
     info = probe(video)
     buf = []
@@ -259,14 +272,6 @@ def bench(
 # ---------------------------------------------------------------------------------------------
 # Protocol analysis
 # ---------------------------------------------------------------------------------------------
-def _subject_from_flags(age: int | None, height_m: float | None, sex: str | None) -> Subject | None:
-    from ptvision.data.models import Subject
-
-    if age is None and height_m is None and sex is None:
-        return None
-    return Subject.model_validate({"age_years": age, "height_m": height_m, "sex": sex})
-
-
 @app.command()
 def analyze(
     source: Annotated[
@@ -308,13 +313,17 @@ def analyze(
         ),
     ] = None,
     max_height: Annotated[
-        int | None, typer.Option(help="Downscale to this height during ingest (e.g. 1080 for 4K).")
+        int | None,
+        typer.Option(
+            help="Cap the shorter side of the frame during ingest (1080 turns 4K into 1920x1080 "
+            "or 1080x1920)."
+        ),
     ] = None,
 ) -> None:
     """Run a clinical protocol on a video and write a report."""
-    from ptvision.io.video import require_ffmpeg
     from ptvision.pipeline import AnalyzeOptions
     from ptvision.pipeline import analyze as _analyze
+    from ptvision.video import require_ffmpeg
 
     require_ffmpeg()
     if (patient is None) != (visit is None):
@@ -332,14 +341,14 @@ def analyze(
         overlay=overlay,
         reuse_pose=reuse_pose,
         manual_start_s=t0,
-        subject=_subject_from_flags(age, height_m, sex),
+        subject=subject_from_flags(age, height_m, sex),
         color_by=color_by,  # type: ignore[arg-type]
         max_height=max_height,
     )
     if color_by not in (None, "rules", "confidence"):
         err.print("[red]--color-by must be rules or confidence[/]")
         raise typer.Exit(2)
-    with _progress() as prog:
+    with progress_bar() as prog:
         task = prog.add_task("starting", total=None)
 
         def on_progress(done: int, total: int | None) -> None:
@@ -369,8 +378,9 @@ def analyze(
         console.print(f"   {m.label}{side}: [bold]{m.formatted()}[/]  tier {m.tier}")
     for w in res.warnings:
         console.print(f"   [yellow]note[/] {w}")
-    console.print(f"[bold]report[/] {res.report_html}")
-    console.print(f"       {res.report_json}")
+    console.print(f"[bold]report[/] {res.report_html}", soft_wrap=True)
+    console.print(f"       {res.report_json}", soft_wrap=True)
+    _finish_after_inference()
 
 
 protocols_app = typer.Typer(help="List and inspect clinical protocols.", no_args_is_help=True)
@@ -382,6 +392,8 @@ def protocols_list() -> None:
     from ptvision.clinical.protocol import builtin_protocol_ids, load_protocol
 
     t = Table("id", "version", "name", "view", "primary metric")
+    t.columns[0].no_wrap = True
+    t.columns[4].no_wrap = True
     for pid in builtin_protocol_ids():
         p = load_protocol(pid)
         prim = p.primary_metric()
@@ -423,122 +435,47 @@ def protocols_show(
 # ---------------------------------------------------------------------------------------------
 # Data store: patients, visits, trials
 # ---------------------------------------------------------------------------------------------
-patient_app = typer.Typer(help="Manage patients in the local data store.", no_args_is_help=True)
-visit_app = typer.Typer(help="Manage visits.", no_args_is_help=True)
-app.add_typer(patient_app, name="patient")
-app.add_typer(visit_app, name="visit")
-
-
-def _store() -> DataStore:
-    from ptvision.data.store import DataStore
-
-    return DataStore(settings().data_dir)
-
-
-@patient_app.command("new")
-def patient_new(
-    label: Annotated[str, typer.Option(help="Pseudonymous label (never a real name).")],
-    patient_id: Annotated[str | None, typer.Option(help="Custom id (default generated).")] = None,
-    age: Annotated[int | None, typer.Option()] = None,
-    height_m: Annotated[float | None, typer.Option()] = None,
-    sex: Annotated[str | None, typer.Option(help="f | m | other")] = None,
-    notes: Annotated[str | None, typer.Option()] = None,
-) -> None:
-    """Create a patient record."""
-    from ptvision.data.ids import new_id, now_iso
-    from ptvision.data.models import Patient, Subject
-
-    st = _store()
-    pid = patient_id or new_id("P")
-    p = Patient(
-        patient_id=pid,
-        label=label,
-        created_at=now_iso(),
-        subject=_subject_from_flags(age, height_m, sex) or Subject(),
-        notes=notes,
-    )
-    st.create_patient(p)
-    console.print(f"created patient [bold]{pid}[/] ({label}) in {st.root}")
-
-
-@patient_app.command("list")
-def patient_list() -> None:
-    st = _store()
-    t = Table("patient_id", "label", "age", "height m", "sex", "visits")
-    for p in st.list_patients():
-        t.add_row(
-            p.patient_id,
-            p.label,
-            str(p.subject.age_years or ""),
-            str(p.subject.height_m or ""),
-            p.subject.sex or "",
-            str(len(st.list_visits(p.patient_id))),
+def _require_app() -> Callable[..., int]:
+    """Import the desktop app and check ffmpeg, with one clear message per missing piece."""
+    try:
+        from ptvision.app.main import main as app_main
+    except ImportError as e:
+        err.print(
+            f"[red]desktop app dependencies missing:[/] {e}\ninstall with `uv sync --extra app`"
         )
-    console.print(t)
-    console.print(f"data_dir {st.root}")
+        raise typer.Exit(1) from e
+    try:
+        from ptvision.video import require_ffmpeg
 
-
-@visit_app.command("new")
-def visit_new(
-    patient: Annotated[str, typer.Option(help="Patient id.")],
-    date: Annotated[str | None, typer.Option(help="ISO date (default today).")] = None,
-    episode: Annotated[
-        str | None, typer.Option(help="Episode id/label this visit belongs to.")
-    ] = None,
-    notes: Annotated[str | None, typer.Option()] = None,
-) -> None:
-    """Create a visit for a patient."""
-    from datetime import date as _date
-
-    from ptvision.data.ids import new_id
-    from ptvision.data.models import Visit
-
-    st = _store()
-    vid = new_id("V")
-    v = Visit(
-        visit_id=vid,
-        patient_id=patient,
-        date=date or _date.today().isoformat(),
-        episode_id=episode,
-        notes=notes,
-    )
-    st.create_visit(v)
-    console.print(f"created visit [bold]{vid}[/] for patient {patient} on {v.date}")
-
-
-@visit_app.command("list")
-def visit_list(patient: Annotated[str, typer.Option(help="Patient id.")]) -> None:
-    st = _store()
-    t = Table("visit_id", "date", "episode", "trials")
-    for v in st.list_visits(patient):
-        t.add_row(
-            v.visit_id, v.date, v.episode_id or "", str(len(st.list_trials(patient, v.visit_id)))
-        )
-    console.print(t)
+        require_ffmpeg()
+    except Exception as e:
+        err.print(f"[red]{e}[/]")
+        raise typer.Exit(1) from e
+    return app_main
 
 
 @app.command()
-def report(
-    trial_dir: Annotated[
-        Path, typer.Argument(exists=True, file_okay=False, help="Trial directory.")
-    ],
-    run: Annotated[str | None, typer.Option(help="Run id (default latest).")] = None,
+def demo(
+    pose_only: Annotated[
+        bool, typer.Option("--pose-only", help="Skeleton and confidence colours only, no protocol.")
+    ] = False,
 ) -> None:
-    """Re-render report.html from an existing run's report.json."""
-    from ptvision.data.store import RunDir, TrialDir
-    from ptvision.io.jsonio import read_json
-    from ptvision.report.build import build_report
-    from ptvision.report.schema import ReportBundle
+    """Open the viewer on the bundled sample clip (a side-view sit-to-stand)"""
+    from ptvision.samples import sample
+    from ptvision.trials.models import Subject
 
-    trial = TrialDir(trial_dir)
-    rd = RunDir(trial.runs_dir / run) if run else trial.latest_run()
-    if rd is None or not (rd.path / "report.json").exists():
-        err.print("[red]no report.json found for that run[/]")
-        raise typer.Exit(1)
-    bundle = ReportBundle.model_validate(read_json(rd.path / "report.json"))
-    template = "sts.html.j2"
-    _, html = build_report(bundle, rd.path, template)
-    console.print(f"re-rendered {html}")
+    smp = sample()
+    app_main = _require_app()
+    subject = Subject(height_m=smp.height_m, age_years=smp.age_years, sex=smp.sex)
+    console.print(f"sample: {smp.description}")
+    raise typer.Exit(
+        app_main(
+            smp.path,
+            protocol="pose" if pose_only else smp.protocol,
+            out_dir=Path("ptv_out") / "sample",
+            subject=subject,
+        )
+    )
 
 
 @app.command("app")
@@ -548,126 +485,35 @@ def app_cmd(
         typer.Argument(exists=True, help="Video to process, or a trial folder to open."),
     ] = None,
     protocol: Annotated[
-        str, typer.Option("--protocol", "-p", help="pose | sts_5x | sts_30s | TOML path")
+        str,
+        typer.Option(
+            "--protocol",
+            "-p",
+            help="pose (skeleton only), a built-in protocol id (see `ptv protocols list`), "
+            "or a TOML path",
+        ),
     ] = "pose",
     out: Annotated[
         Path | None, typer.Option("--out", "-o", help="Output trial directory for a video.")
     ] = None,
     run: Annotated[str | None, typer.Option(help="Run id to open (default latest).")] = None,
 ) -> None:
-    """Open the desktop viewer (drop a video in, watch progress, play with the skeleton overlay)."""
-    try:
-        from ptvision.app.main import main as app_main
-    except ImportError as e:
-        err.print(
-            f"[red]desktop app dependencies missing:[/] {e}\ninstall with `uv sync --extra app`"
-        )
-        raise typer.Exit(1) from e
-    try:
-        from ptvision.io.video import require_ffmpeg
+    """Open the desktop viewer (drop a video in, watch progress, play with the skeleton overlay).
 
-        require_ffmpeg()
-    except Exception as e:
-        err.print(f"[red]{e}[/]")
-        raise typer.Exit(1) from e
+    No video yet? `ptv demo` opens the bundled sample clip.
+    Headless: PTV_APP_SCREENSHOT=<png> saves the window once the viewer shows, then exits.
+    (Set QT_QPA_PLATFORM=offscreen when there is no display.)
+    """
+    app_main = _require_app()
     raise typer.Exit(app_main(source, protocol=protocol, out_dir=out, run_id=run))
 
 
 # ---------------------------------------------------------------------------------------------
-# Public datasets  [REVIEW] new (BACKLOG B29)
+# Public datasets  [REVIEW] new
 # ---------------------------------------------------------------------------------------------
-datasets_app = typer.Typer(
-    help="Public validation datasets: pull, list, evaluate.", no_args_is_help=True
-)
-app.add_typer(datasets_app, name="datasets")
 
 
-@datasets_app.command("list")
-def datasets_list() -> None:
-    """Show known datasets, licenses, and what is on disk."""
-    from ptvision.datasets.registry import load_manifest, status
-
-    t = Table("name", "kind", "license", "files", "size GB", "dir")
-    for spec in load_manifest().values():
-        st = status(spec)
-        t.add_row(
-            str(st["name"]),
-            str(st["kind"]),
-            str(st["license"]),
-            str(st["files"]),
-            str(st["size_gb"]),
-            str(st["dir"]),
-        )
-    console.print(t)
-
-
-@datasets_app.command("pull")
-def datasets_pull(
-    names: Annotated[list[str], typer.Argument(help="Dataset names (see `ptv datasets list`).")],
-    verify: Annotated[bool, typer.Option(help="Verify md5 checksums.")] = True,
-) -> None:
-    """Download, verify, extract, and record provenance (license, checksums, date)."""
-    from ptvision.datasets.registry import load_manifest, pull
-
-    specs = load_manifest()
-    for name in names:
-        if name not in specs:
-            err.print(f"[red]unknown dataset {name!r}[/]; known: {', '.join(specs)}")
-            raise typer.Exit(2)
-    with _progress() as prog:
-        task = prog.add_task("starting", total=None)
-
-        def on_progress(label: str, done: int, total: int | None) -> None:
-            prog.update(task, description=label, completed=done, total=total)
-
-        for name in names:
-            res = pull(specs[name], verify=verify, progress=on_progress)
-            console.print(
-                f"[bold]{name}[/] ({res.spec.license}): downloaded {len(res.downloaded)}, "
-                f"already present {len(res.skipped)}, extracted {len(res.extracted)} "
-                f"-> {res.dirs.root}"
-            )
-
-
-@datasets_app.command("eval-gait")
-def datasets_eval_gait(
-    name: Annotated[str, typer.Argument(help="fukuchi2018 | schreiber2019 | vancriekinge2023")],
-    limit: Annotated[int | None, typer.Option(help="Only the first N trials.")] = None,
-    fps: Annotated[float, typer.Option(help="Virtual camera frame rate to resample to.")] = 30.0,
-    method: Annotated[str, typer.Option(help="Zeni method: coordinate | velocity")] = "coordinate",
-) -> None:
-    """Score our heel-strike / toe-off detector against a mocap dataset's labelled events."""
-    from ptvision.datasets.eval_gait import evaluate_dataset
-
-    with _progress() as prog:
-        task = prog.add_task("evaluating", total=None)
-
-        def on_progress(done: int, total: int | None) -> None:
-            prog.update(task, completed=done, total=total)
-
-        summary = evaluate_dataset(name, limit=limit, fps=fps, method=method, progress=on_progress)
-    console.print(summary.render(), markup=False)
-    console.print(f"[bold]written[/] {summary.out_dir}")
-
-
-@datasets_app.command("eval-sts")
-def datasets_eval_sts(
-    limit: Annotated[int | None, typer.Option(help="Only the first N episodes.")] = None,
-) -> None:
-    """Run the sit-to-stand segmenter on UI-PRMD m05 episodes (each is exactly one repetition)."""
-    from ptvision.datasets.uiprmd import evaluate_sts
-
-    results, out_dir = evaluate_sts(limit=limit)
-    n = len(results)
-    one = sum(1 for r in results if r.reps == 1)
-    console.print(
-        f"uiprmd m05: {n} episodes, exactly one rise detected in {one} ({one / max(n, 1):.0%})"
-    )
-    n_zero = sum(1 for r in results if r.reps == 0)
-    n_multi = sum(1 for r in results if r.reps > 1)
-    n_err = sum(1 for r in results if r.reps < 0)
-    console.print(f"  zero: {n_zero}  multiple: {n_multi}  errors: {n_err}")
-    console.print(f"[bold]written[/] {out_dir}")
+_register_subcommands()
 
 
 if __name__ == "__main__":

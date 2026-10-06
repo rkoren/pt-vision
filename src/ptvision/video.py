@@ -1,16 +1,13 @@
 """Video probing, normalization, frame iteration and writing.
 
-Phone clips arrive as HEVC (often 10-bit), carry a display-rotation matrix instead of rotated
-pixels, and may be variable frame rate. Everything downstream assumes a constant-frame-rate,
-8-bit, physically rotated H.264 file, so ingest normalizes once with ffmpeg and never touches
-the original again.
-"""
+Converts from HEVC (often 10-bit), handling frame rate and rotation"""
 
 from __future__ import annotations
 
 import json
 import shutil
 import subprocess
+import sys
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -24,12 +21,20 @@ class FFmpegNotFoundError(RuntimeError):
     pass
 
 
+def ffmpeg_install_hint() -> str:
+    """One copy-pasteable install line for this platform (shared by errors and `ptv doctor`)."""
+    if sys.platform == "win32":
+        return "winget install Gyan.FFmpeg   (then open a new terminal so PATH is refreshed)"
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    return "sudo apt install ffmpeg"
+
+
 def require_ffmpeg() -> None:
     missing = [t for t in ("ffmpeg", "ffprobe") if shutil.which(t) is None]
     if missing:
         raise FFmpegNotFoundError(
-            f"{', '.join(missing)} not found on PATH. Install ffmpeg "
-            "(macOS: `brew install ffmpeg`; Debian/Ubuntu: `apt install ffmpeg`)."
+            f"{', '.join(missing)} not found on PATH. Install ffmpeg: {ffmpeg_install_hint()}"
         )
 
 
@@ -154,8 +159,15 @@ def normalize(
     info = probe(src)
     fps_arg = info.fps_fraction if fps is None else str(fps)
     filters = [f"fps={fps_arg}"]
-    if max_height is not None and info.display_height > max_height:
-        filters.append(f"scale=-2:{max_height}")
+    # [REVIEW]: `max_height` caps the SHORTER side after rotation, so 1080 turns 4K into
+    # 1920x1080 landscape or 1080x1920 portrait alike (a portrait clip used to be squeezed to
+    # 608x1080 because the long side was capped).
+    if max_height is not None:
+        w, h = info.display_width, info.display_height
+        if h <= w and h > max_height:
+            filters.append(f"scale=-2:{max_height}")
+        elif w < h and w > max_height:
+            filters.append(f"scale={max_height}:-2")
     dst.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg",

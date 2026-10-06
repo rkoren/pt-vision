@@ -16,6 +16,7 @@ seat-off / stand events within ±2 frames of manual annotation. Record everythin
 | clip | stopwatch (s) | ptvision (s) | diff (s) | start rule | end rule |
 |---|---|---|---|---|---|
 | sts1.MOV | 7.01 | 6.90 | −0.11 | first_seat_off | fifth_stand (truncated: frame 235/238) |
+| sts_side.MOV (bundled sample, `src/ptvision/samples/sts_side.mp4`) | 10.75 | 10.40 | −0.35 | first_seat_off | fifth_stand; recording continues after the test; view ratio 0.45 (warn) |
 | sts2.MOV | 10.2 | 9.67 | −0.53 | first_seat_off | fifth_stand (truncated: frame 334/335) |
 
 ## Event frames vs manual annotation
@@ -30,6 +31,6 @@ leave the seat; stand = first frame the hips stop rising; seated = first frame f
 ## Decisions
 - start/end rule agreed with PT partner: (pending)
 - observed failure modes and parameter changes: both takes stopped recording during the fifth rise, so the
-  end event is clipped (B60); ghost tracks on furniture (B56); oblique-view hard fail (B57); pre-test
-  descent (B58); camera-motion warning from subject motion (B59). Hand-timed comparison is not yet a
+  end event is clipped; ghost tracks on furniture; oblique-view hard fail; pre-test
+  descent; camera-motion warning from subject motion. Hand-timed comparison is not yet a
   valid accuracy figure until re-recorded with 2 s of tail.

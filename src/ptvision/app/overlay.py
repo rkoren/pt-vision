@@ -19,6 +19,7 @@ class SkeletonItem(QGraphicsItem):
         self._t = 0
         self._mode: vs.Mode = "confidence"
         self._show_others = True
+        self._smooth = True
         self._bone_width = 3.0
         self.setZValue(1)
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
@@ -49,6 +50,18 @@ class SkeletonItem(QGraphicsItem):
         self._show_others = bool(show)
         self.update()
 
+    def set_smooth(self, smooth: bool) -> None:
+        self._smooth = bool(smooth)
+        self.update()
+
+    def primary_coords(self, t: int) -> np.ndarray:
+        """(K, 2) coordinates drawn for the primary person at frame t."""
+        assert self._session is not None
+        s = self._session
+        if self._smooth and s.smoothed is not None and t < s.smoothed.shape[0]:
+            return np.asarray(s.smoothed[t])
+        return np.asarray(s.track.coords[t, s.primary_slot])
+
     # ---- QGraphicsItem ---------------------------------------------------------------
     def boundingRect(self) -> QRectF:
         if self._session is None:
@@ -69,11 +82,14 @@ class SkeletonItem(QGraphicsItem):
         edges = s.edges
 
         if self._show_others:
-            pen = QPen(QColor(*vs.OTHER_PERSON), 1.5)
+            pen = QPen(
+                QColor(*vs.OTHER_PERSON, 150), 1.5
+            )  # translucent: recedes behind the subject
             pen.setCosmetic(True)
             painter.setPen(pen)
+            spurious = s.track.spurious
             for p in range(coords.shape[0]):
-                if p == s.primary_slot or np.isnan(coords[p]).all():
+                if p == s.primary_slot or spurious[p] or np.isnan(coords[p]).all():
                     continue
                 for a, b in edges:
                     if (
@@ -86,7 +102,7 @@ class SkeletonItem(QGraphicsItem):
                         )
 
         rgb, visible = s.bone_colors(self._t, self._mode)
-        c = coords[s.primary_slot]
+        c = self.primary_coords(self._t)
         for xa, ya, xb, yb, col in bone_segments(c, edges, rgb, visible):
             pen = QPen(QColor(*col), self._bone_width)
             pen.setCosmetic(True)

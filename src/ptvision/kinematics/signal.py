@@ -1,4 +1,4 @@
-"""Small, NaN-aware 1-D signal helpers shared by segmenters."""
+"""Signal helpers shared by segmenters"""
 
 from __future__ import annotations
 

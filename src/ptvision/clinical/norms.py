@@ -9,7 +9,7 @@ from importlib import resources
 from typing import Literal
 
 from ptvision.clinical.metrics.base import Metric, NormComparison
-from ptvision.data.models import Subject
+from ptvision.trials.models import Subject
 
 
 @dataclass(frozen=True)

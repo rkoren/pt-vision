@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QGridLayout,
     QGroupBox,
     QHeaderView,
     QLabel,
@@ -58,6 +59,7 @@ class SidePanel(QWidget):
     angleToggled = Signal(str, bool)
     eventActivated = Signal(int)
     showOthersToggled = Signal(bool)
+    smoothToggled = Signal(bool)
 
     def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
         super().__init__(parent)
@@ -99,6 +101,13 @@ class SidePanel(QWidget):
         self.show_others.setChecked(True)
         self.show_others.toggled.connect(self.showOthersToggled.emit)
         ol.addWidget(self.show_others)
+        self.smooth = QCheckBox("smooth skeleton")
+        self.smooth.setChecked(True)
+        self.smooth.setToolTip(
+            "Draw the gap-filled, low-passed joints used for the angles; off = raw model output"
+        )
+        self.smooth.toggled.connect(self.smoothToggled.emit)
+        ol.addWidget(self.smooth)
         lay.addWidget(opts)
 
         self.angles_box = QGroupBox("Timeline angles")
@@ -106,7 +115,14 @@ class SidePanel(QWidget):
         self._angle_checks: dict[str, QCheckBox] = {}
         lay.addWidget(self.angles_box)
 
-        mb = QGroupBox("Measurements")
+        # live values of the angles at the current frame, big enough to read from a distance
+        self.readout_box = QGroupBox("At this frame")
+        self.readout_layout = QGridLayout(self.readout_box)
+        self.readout_layout.setColumnStretch(0, 1)
+        self._readout_values: dict[str, QLabel] = {}
+        lay.addWidget(self.readout_box)
+
+        mb = self.metrics_box = QGroupBox("Measurements")  # [REVIEW]: hidden for pose-only
         ml = QVBoxLayout(mb)
         self.metrics = QTableWidget(0, 3)
         self.metrics.setHorizontalHeaderLabels(["measure", "value", "tier"])
@@ -129,7 +145,7 @@ class SidePanel(QWidget):
         ml.addWidget(self.norm_label)
         lay.addWidget(mb)
 
-        eb = QGroupBox("Events (click to jump)")
+        eb = self.events_box = QGroupBox("Events (click to jump)")
         el = QVBoxLayout(eb)
         self.events = QListWidget()
         self.events.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -145,8 +161,22 @@ class SidePanel(QWidget):
         lay.addStretch(1)
 
     # ---- population -------------------------------------------------------------------
+    def set_readout(self, values: dict[str, float]) -> None:
+        for name, label in self._readout_values.items():
+            v = values.get(name)
+            label.setText(f"{v:.0f}°" if v is not None else "–")
+
     def set_session(self, session: TrialSession | None) -> None:
         self._session = session
+        for lbl in list(self._readout_values.values()):
+            self.readout_layout.removeWidget(lbl)
+            lbl.deleteLater()
+        while self.readout_layout.count():
+            layout_item = self.readout_layout.takeAt(0)
+            widget = layout_item.widget() if layout_item is not None else None
+            if widget is not None:
+                widget.deleteLater()
+        self._readout_values.clear()
         for w in list(self._angle_checks.values()):
             self.angles_layout.removeWidget(w)
             w.deleteLater()
@@ -169,7 +199,10 @@ class SidePanel(QWidget):
             lines += [f"• <b>{c.name}</b> ({c.status}): {c.message}" for c in bad]
             self.quality.setText("<br>".join(lines))
         else:
-            self.quality.setText("<span style='color:#9aa4b2'>pose only, no protocol checks</span>")
+            self.quality.setText(
+                "<span style='color:#9aa4b2'>pose only: skeleton and tracking confidence, "
+                "no protocol measurements</span>"
+            )
 
         modes = session.available_modes()
         self.radio_rules.setEnabled("rules" in modes)
@@ -189,7 +222,19 @@ class SidePanel(QWidget):
             cb.toggled.connect(lambda on, n=name: self.angleToggled.emit(n, on))
             self.angles_layout.addWidget(cb)
             self._angle_checks[name] = cb
+        for row, name in enumerate(session.angles.names):
+            title = QLabel(name.replace("_", " "))
+            title.setStyleSheet("color: #9aa4b2;")
+            value = QLabel("–")
+            value.setStyleSheet("font-size: 20px; font-weight: 600;")
+            value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.readout_layout.addWidget(title, row, 0)
+            self.readout_layout.addWidget(value, row, 1)
+            self._readout_values[name] = value
 
+        has_protocol = session.protocol is not None
+        self.metrics_box.setVisible(has_protocol)
+        self.events_box.setVisible(has_protocol)
         self.metrics.setRowCount(len(session.metrics))
         for i, m in enumerate(session.metrics):
             side = f" ({m.side})" if m.side else ""

@@ -18,6 +18,7 @@ ptvision-data/
 *.MOV
 *.mp4
 !tests/fixtures/*.mp4
+!src/ptvision/samples/*.mp4
 *.onnx
 *.zip
 
@@ -31,3 +32,7 @@ decisions
 
 # CI model-weight cache (PTV_MODEL_DIR in .github/workflows/ci.yml)
 .ptv-models/
+
+# local planning
+BACKLOG.md
+.ipynb_checkpoints/

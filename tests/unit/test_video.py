@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ptvision.io.video import FrameWriter, iter_frames, normalize, probe
+from ptvision.video import FrameWriter, iter_frames, normalize, probe
 
 pytestmark = pytest.mark.ffmpeg
 
@@ -68,6 +68,16 @@ def test_normalize_resamples_and_scales(tmp_path) -> None:
     assert out.pix_fmt == "yuv420p"
 
 
+def test_max_height_caps_the_shorter_side_for_portrait(tmp_path) -> None:
+    # [REVIEW] B65: a portrait clip keeps its long side; only the short side is capped
+    p = synth(tmp_path / "p.mp4", size="480x640")
+    out = normalize(p, tmp_path / "n.mp4", max_height=240)
+    assert (out.width, out.height) == (240, 320)
+    q = synth(tmp_path / "small.mp4", size="200x300")
+    out2 = normalize(q, tmp_path / "n2.mp4", max_height=240)
+    assert (out2.width, out2.height) == (200, 300)  # already within the cap: untouched
+
+
 def test_iter_frames_and_writer_roundtrip(tmp_path) -> None:
     p = synth(tmp_path / "c.mp4", seconds=0.5)
     frames = list(iter_frames(p))
@@ -121,7 +131,7 @@ def test_normalize_uses_short_gop(tmp_path) -> None:
 
 
 def test_frame_source_random_access_matches_sequential(tmp_path) -> None:
-    from ptvision.io.video import FrameSource
+    from ptvision.video import FrameSource
 
     p = synth(tmp_path / "src.mp4", seconds=3.0, size="320x240")
     norm = normalize(p, tmp_path / "n.mp4").path

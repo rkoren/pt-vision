@@ -1,4 +1,4 @@
-"""PoseTrack: dense in-memory keypoint time series with a long-format Parquet serialization.
+"""PoseTrack: keypoint time series with Parquet serialization.
 
 Parquet schema v1 (one row per frame x person x keypoint, absent persons omitted):
   camera_id (str), frame (int32), time_s (float64), person_id (int16), keypoint (str),
@@ -82,6 +82,29 @@ class PoseTrack:
     def present(self) -> np.ndarray:
         """(T, P) bool: person has at least one non-NaN keypoint in the frame."""
         return ~np.isnan(self.coords).all(axis=(2, 3))
+
+    # ---- spurious tracks ([REVIEW]) ------------------------------------------
+    @property
+    def spurious(self) -> np.ndarray:
+        """(P,) bool: tracks marked as not a person (see `pose.tracking.spurious_slots`"""
+        if "spurious_ids" not in self.extra_metadata:
+            # older trials without the mask (or ones loaded by the app) get it computed once
+            from ptvision.pose.tracking import spurious_slots
+
+            self.mark_spurious(spurious_slots(self.coords, self.score, fps=self.fps))
+            self.extra_metadata.setdefault("spurious_ids", "")
+        raw = self.extra_metadata.get("spurious_ids", "")
+        ids = {int(x) for x in raw.split(",") if x.strip()}
+        return np.array([int(i) in ids for i in self.person_ids], dtype=bool)
+
+    def mark_spurious(self, mask: np.ndarray) -> None:
+        ids = [str(int(i)) for i, m in zip(self.person_ids, mask, strict=True) if m]
+        self.extra_metadata["spurious_ids"] = ",".join(ids)  # "" = computed, none spurious
+
+    @property
+    def n_persons_real(self) -> int:
+        """Persons excluding spurious tracks."""
+        return int((~self.spurious).sum())
 
     def presence_fraction(self) -> np.ndarray:
         """(P,) fraction of frames in which each person is present."""
@@ -216,7 +239,7 @@ class PoseTrack:
             score=score,
             person_ids=person_ids,
             camera_id=metadata.get("camera_id", "cam0"),
-            coord_space=metadata.get("coord_space", "image_px"),  # type: ignore[arg-type]
+            coord_space=metadata.get("coord_space", "image_px"),
             image_size=image_size,
             stage=metadata.get("stage", "raw"),
             extra_metadata=extra,

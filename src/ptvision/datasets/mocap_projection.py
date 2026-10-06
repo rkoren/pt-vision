@@ -1,4 +1,4 @@
-# [REVIEW] new file (BACKLOG B29)
+# [REVIEW] new file
 """Turn marker-based mocap into what a single side camera would see.
 
 An orthographic sagittal camera: image x runs along the walking direction (sign chosen so the

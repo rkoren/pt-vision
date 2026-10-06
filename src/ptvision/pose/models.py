@@ -1,8 +1,4 @@
-"""Model weight manifest, download, cache, and checksum verification.
-
-rtmlib downloads weights itself into ~/.cache/rtmlib, but without checksums and without a way
-to record which file was used. We own the download so provenance can carry the exact sha256.
-"""
+"""Model weight manifest, download, cache, and checksum verification"""
 
 from __future__ import annotations
 
@@ -12,16 +8,18 @@ import tempfile
 import tomllib
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
 from ptvision.config import settings
-from ptvision.io.hashing import sha256_file
+from ptvision.files import sha256_file
 
 MODE_NAMES = ("lightweight", "balanced", "performance")
 
-# Same mirror rtmlib falls back to when the OpenMMLab download host is unavailable.
+DownloadProgress = Callable[[str, int, int | None], None]  # (model name, done bytes, total or None)
+
 _HF_MIRROR = {
     "https://download.openmmlab.com/mmpose/v1/projects/": "https://huggingface.co/Tau-J/RTMPose/resolve/main/",
 }
@@ -117,15 +115,27 @@ class ModelManager:
         return self._find_onnx(self.extract_dir(spec)) is not None
 
     # ---- download ----------------------------------------------------------------------
-    def ensure(self, name: str, *, verify: bool = True, quiet: bool = False) -> ResolvedModel:
-        """Return the local .onnx path for a model, downloading and extracting if needed."""
+    def ensure(
+        self,
+        name: str,
+        *,
+        verify: bool = True,
+        quiet: bool = False,
+        progress: DownloadProgress | None = None,
+    ) -> ResolvedModel:
+        """Return the local .onnx path for a model, downloading and extracting if needed"""
         spec = self.models[name]
         self.models_dir.mkdir(parents=True, exist_ok=True)
         archive = self.archive_path(spec)
         folder = self.extract_dir(spec)
 
-        if not archive.exists() or self._find_onnx(folder) is None:
-            self._download(spec.url, archive, quiet=quiet)
+        if self._find_onnx(folder) is None:
+            # handle archive already on disk
+            have_archive = archive.exists() and (
+                not verify or not spec.sha256 or sha256_file(archive) == spec.sha256
+            )
+            if not have_archive:
+                self._download(spec.url, archive, quiet=quiet, progress=progress, label=name)
             if folder.exists():
                 shutil.rmtree(folder)
             folder.mkdir(parents=True)
@@ -144,18 +154,37 @@ class ModelManager:
             raise FileNotFoundError(f"No .onnx file found in {folder}")
         return ResolvedModel(spec, onnx, archive_sha, sha256_file(onnx))
 
-    def ensure_mode(self, mode: str, *, verify: bool = True, quiet: bool = False) -> ModePaths:
+    def ensure_mode(
+        self,
+        mode: str,
+        *,
+        verify: bool = True,
+        quiet: bool = False,
+        progress: DownloadProgress | None = None,
+    ) -> ModePaths:
         if mode not in self.modes:
             raise KeyError(f"Unknown mode {mode!r}; choose from {list(self.modes)}")
         m = self.modes[mode]
         return ModePaths(
             mode=mode,
-            det=self.ensure(m["det"], verify=verify, quiet=quiet),
-            pose=self.ensure(m["pose"], verify=verify, quiet=quiet),
+            det=self.ensure(m["det"], verify=verify, quiet=quiet, progress=progress),
+            pose=self.ensure(m["pose"], verify=verify, quiet=quiet, progress=progress),
         )
 
-    def _download(self, url: str, dst: Path, *, quiet: bool) -> None:
-        """Download to `dst` atomically, falling back to the Hugging Face mirror rtmlib uses."""
+    def missing_for_mode(self, mode: str) -> list[str]:
+        m = self.modes.get(mode, {})
+        return [n for n in m.values() if not self.is_available(n)]
+
+    def _download(
+        self,
+        url: str,
+        dst: Path,
+        *,
+        quiet: bool,
+        progress: DownloadProgress | None = None,
+        label: str = "",
+    ) -> None:
+        """Download to `dst`, fall back to the Hugging Face mirror rtmlib uses"""
         urls = [url]
         mirror = mirror_url(url)
         if mirror:
@@ -172,7 +201,13 @@ class ModelManager:
                     urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp,
                     tmp_path.open("wb") as out,
                 ):
-                    shutil.copyfileobj(resp, out, length=1 << 20)
+                    total = int(resp.headers.get("Content-Length") or 0) or None
+                    done = 0
+                    while chunk := resp.read(1 << 20):
+                        out.write(chunk)
+                        done += len(chunk)
+                        if progress is not None:
+                            progress(label or dst.name, done, total)
                 tmp_path.replace(dst)
                 return
             except Exception as e:

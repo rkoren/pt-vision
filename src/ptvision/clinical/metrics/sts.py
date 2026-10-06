@@ -81,7 +81,11 @@ def sts_total_time(ctx: MetricContext) -> Metric:
         value=None if value is None else round(value, 2),
         error=round(2.0 / ctx.fps, 3),
         error_kind="resolution",
-        n_events=ev.n_reps,
+        # the repetitions the timing actually spans (a clip with extra stands is timed on the
+        # first n_reps_expected; handoff eval 6 flagged n_events 10 with "timing uses the first 5")
+        n_events=min(ev.n_reps, ev.params.n_reps_expected)
+        if ev.params.n_reps_expected > 0
+        else ev.n_reps,
         flags=list(ev.warnings),
         note=f"start: {ev.params.start_rule}, end: {ev.params.end_rule}",
     )

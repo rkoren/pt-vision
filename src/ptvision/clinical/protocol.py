@@ -10,8 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ptvision.data.models import View
 from ptvision.kinematics.angles import ANGLE_DEFS
+from ptvision.trials.models import View
 from ptvision.viz.skeleton import SEGMENT_NAMES
 from ptvision.viz.status import Band, Rule
 

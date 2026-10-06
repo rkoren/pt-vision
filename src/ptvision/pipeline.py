@@ -1,11 +1,11 @@
-"""Stage orchestration. Each stage writes its artifact before the next runs so partial failures
-are inspectable, and pose extraction is reused across runs when the model provenance matches."""
+"""Stage orchestration: ingest, pose, quality, clean, angles, segment, metrics, report"""
 
 from __future__ import annotations
 
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,16 +14,14 @@ import numpy as np
 
 from ptvision._version import __version__
 from ptvision.config import settings
-from ptvision.data.ids import new_id, now_iso
-from ptvision.data.models import CameraCapture, Capture, RunProvenance, Subject, View
-from ptvision.data.store import DataStore, RunDir, TrialDir, base_provenance
-from ptvision.io.hashing import sha256_file
-from ptvision.io.jsonio import read_json, write_json
-from ptvision.io.video import iter_frames, normalize, probe
-from ptvision.pose.base import PoseBackend, ProgressFn
+from ptvision.files import read_json, sha256_file, write_json
+from ptvision.pose.base import PoseBackend, PreviewFn, ProgressFn
 from ptvision.pose.overlay import render_overlay
 from ptvision.pose.track import PoseTrack
-from ptvision.pose.tracking import select_primary_person
+from ptvision.pose.tracking import select_primary_person, spurious_slots
+from ptvision.trials.models import CameraCapture, Capture, RunProvenance, Subject, View
+from ptvision.trials.store import DataStore, RunDir, TrialDir, base_provenance, new_id, now_iso
+from ptvision.video import iter_frames, normalize, probe
 from ptvision.viz import status as vs
 
 StageHook = Callable[[str], None]
@@ -140,6 +138,7 @@ def extract_pose(
     reuse: bool = True,
     progress: ProgressFn | None = None,
     on_stage: StageHook | None = None,
+    preview: PreviewFn | None = None,
 ) -> tuple[PoseTrack, bool]:
     """Run (or reuse) pose extraction for one camera; fills `prov.pose*` and timing."""
     capture = trial.read_capture()
@@ -169,10 +168,13 @@ def extract_pose(
             image_size=(cam.width, cam.height),
             n_frames=cam.n_frames,
             progress=progress,
+            preview=preview,
         )
         track.camera_id = camera_id
+        track.mark_spurious(spurious_slots(track.coords, track.score, fps=track.fps))
         track.save(parquet)
     prov.timing_s["pose"] = round(time.perf_counter() - t0, 3)
+    prov.pose_reused = bool(reused)
     prov.pose_parquet = str(parquet.relative_to(trial.path))
     prov.pose_parquet_sha256 = sha256_file(parquet)
     return track, reused
@@ -198,6 +200,7 @@ def run_pose(
     reuse: bool = True,
     progress: ProgressFn | None = None,
     on_stage: StageHook | None = None,
+    preview: PreviewFn | None = None,
 ) -> PoseResult:
     """`ptv pose`: extract keypoints, pick the primary person, render overlay, record provenance.
 
@@ -205,12 +208,23 @@ def run_pose(
     run = trial.new_run()
     prov = base_provenance(run.run_id)
     track, reused = extract_pose(
-        trial, backend, prov, camera_id=camera_id, reuse=reuse, progress=progress, on_stage=on_stage
+        trial,
+        backend,
+        prov,
+        camera_id=camera_id,
+        reuse=reuse,
+        progress=progress,
+        on_stage=on_stage,
+        preview=preview,
     )
     primary: int | None = None
     if track.n_persons:
         primary = int(track.person_ids[select_primary_person(track.coords, track.score)])
-    prov.quality = {"primary_person": primary, "n_persons": track.n_persons}
+    prov.quality = {
+        "primary_person": primary,
+        "n_persons": track.n_persons_real,
+        "n_tracks": track.n_persons,
+    }
 
     overlay_path: Path | None = None
     if overlay:
@@ -288,17 +302,94 @@ def _resolve_trial(source: Path, opts: AnalyzeOptions, store: DataStore | None) 
     return DataStore.anonymous_trial(opts.out_dir or Path("ptv_out") / source.stem)
 
 
+def _prepare_trial(
+    source: Path, opts: AnalyzeOptions, store: DataStore | None, **ingest_extra: Any
+) -> TrialDir:
+    """Resolve the trial, ingest the video once, and keep the capture's subject in sync with the
+    options (the CLI flags or the app's drop-page form). Shared by `pose_only` and `analyze`."""
+    trial = _resolve_trial(source, opts, store)
+    if not trial.has_capture():
+        ingest(
+            source,
+            trial,
+            IngestOptions(
+                max_height=opts.max_height,
+                subject=opts.subject,
+                patient_id=opts.patient_id,
+                visit_id=opts.visit_id,
+                **ingest_extra,
+            ),
+        )
+    if opts.subject is not None:
+        capture = trial.read_capture()
+        if capture.subject != opts.subject:
+            capture.subject = opts.subject
+            trial.write_capture(capture)
+    return trial
+
+
+@contextmanager
+def _backend_for(
+    opts: AnalyzeOptions,
+    backend: PoseBackend | None,
+    mode_default: str | None,
+    det_default: int | None,
+    *,
+    progress: ProgressFn | None,
+    on_stage: StageHook | None,
+) -> Iterator[PoseBackend]:
+    """Yield the caller's backend, or build one and release its model sessions afterwards ."""
+    if backend is not None:
+        yield backend
+        return
+    if on_stage:
+        on_stage("loading model")
+    own = _make_backend(opts, mode_default, det_default, progress=progress, on_stage=on_stage)
+    try:
+        yield own
+    finally:
+        _close_backend(own)
+
+
+def _close_backend(backend: PoseBackend) -> None:
+    """Release model sessions created by the pipeline itself ."""
+    close = getattr(backend, "close", None)
+    if callable(close):
+        close()
+
+
 def _make_backend(
-    opts: AnalyzeOptions, mode_default: str | None, det_default: int | None
+    opts: AnalyzeOptions,
+    mode_default: str | None,
+    det_default: int | None,
+    *,
+    progress: ProgressFn | None = None,
+    on_stage: StageHook | None = None,
 ) -> PoseBackend:
+    """Build the pose backend; a first-time weight download is announced as its own stage with
+    byte progress so the app's bar shows it (demo MVP)."""
+    from ptvision.pose.models import ModelManager
     from ptvision.pose.rtmlib_backend import RtmlibBackend
 
     s = settings()
+    mode = opts.mode or mode_default or s.mode
+    mm = ModelManager()
+    download_progress = None
+    missing = mm.missing_for_mode(mode)
+    if missing and on_stage:
+        on_stage(f"downloading model weights ({mode}, one time, about 150 MB)")
+    if missing and progress:
+
+        def download_progress(name: str, done: int, total: int | None) -> None:
+            progress(done, total)
+
     return RtmlibBackend(
-        mode=opts.mode or mode_default or s.mode,
+        mode=mode,
         device=opts.device or s.device,
         backend=opts.backend or s.backend,
         det_frequency=opts.det_frequency or det_default or s.det_frequency,
+        models=mm,
+        download_progress=download_progress,
     )
 
 
@@ -310,6 +401,7 @@ def pose_only(
     backend: PoseBackend | None = None,
     progress: ProgressFn | None = None,
     on_stage: StageHook | None = None,
+    preview: PreviewFn | None = None,
 ) -> PoseResult:
     """Ingest (if needed) + pose extraction + confidence-colored overlay, no protocol.
     Shared by `ptv pose` and the desktop app's "Pose only" mode."""
@@ -317,30 +409,17 @@ def pose_only(
     source = Path(source)
     if on_stage:
         on_stage("ingest")
-    trial = _resolve_trial(source, opts, store)
-    if not trial.has_capture():
-        ingest(
-            source,
+    trial = _prepare_trial(source, opts, store)
+    with _backend_for(opts, backend, None, None, progress=progress, on_stage=on_stage) as be:
+        return run_pose(
             trial,
-            IngestOptions(
-                max_height=opts.max_height,
-                subject=opts.subject,
-                patient_id=opts.patient_id,
-                visit_id=opts.visit_id,
-            ),
+            be,
+            overlay=opts.overlay,
+            reuse=opts.reuse_pose,
+            progress=progress,
+            on_stage=on_stage,
+            preview=preview,
         )
-    if backend is None:
-        if on_stage:
-            on_stage("loading model")
-        backend = _make_backend(opts, None, None)
-    return run_pose(
-        trial,
-        backend,
-        overlay=opts.overlay,
-        reuse=opts.reuse_pose,
-        progress=progress,
-        on_stage=on_stage,
-    )
 
 
 def analyze(
@@ -351,6 +430,7 @@ def analyze(
     backend: PoseBackend | None = None,
     progress: ProgressFn | None = None,
     on_stage: StageHook | None = None,
+    preview: PreviewFn | None = None,
 ) -> AnalyzeResult:
     """Full protocol run: ingest -> pose -> quality -> preprocess -> angles -> segment -> metrics ->
     norms -> export -> figures -> report -> provenance."""
@@ -362,18 +442,14 @@ def analyze(
     from ptvision.kinematics.angles import ANGLE_DEFS, compute_angles
     from ptvision.kinematics.export import write_mot, write_trc
     from ptvision.kinematics.preprocess import PreprocessConfig, preprocess
-    from ptvision.kinematics.scale import build_scale
     from ptvision.pose.overlay import thumbnail
     from ptvision.quality import checks as Q
-    from ptvision.report.build import build_report
+    from ptvision.report.bundle import Figure, ReportBundle, build_report
     from ptvision.report.figures import (
         fig_angles,
-        fig_gait_cycles,
-        fig_gait_events,
         fig_per_rep,
         fig_sts_trajectory,
     )
-    from ptvision.report.schema import Figure, ReportBundle
 
     opts = opts or AnalyzeOptions()
     protocol = load_protocol(opts.protocol)
@@ -385,32 +461,27 @@ def analyze(
 
     # 1. trial + ingest
     stage("ingest")
-    trial = _resolve_trial(source, opts, store)
-    if not trial.has_capture():
-        ingest(
-            source,
-            trial,
-            IngestOptions(
-                max_height=opts.max_height,
-                view=protocol.capture.view,
-                subject=opts.subject,
-                protocol_id=protocol.id,
-                protocol_version=protocol.version,
-                patient_id=opts.patient_id,
-                visit_id=opts.visit_id,
-            ),
-        )
+    trial = _prepare_trial(
+        source,
+        opts,
+        store,
+        view=protocol.capture.view,
+        protocol_id=protocol.id,
+        protocol_version=protocol.version,
+    )
     capture = trial.read_capture()
-    if opts.subject is not None and capture.subject != opts.subject:
-        capture.subject = opts.subject
-        trial.write_capture(capture)
     cam = capture.cameras[0]
     video = trial.path / cam.normalized_file
 
     # 2. pose
-    if backend is None:
-        stage("loading model")
-        backend = _make_backend(opts, protocol.pose.mode, protocol.pose.det_frequency)
+    backend_cm = _backend_for(
+        opts,
+        backend,
+        protocol.pose.mode,
+        protocol.pose.det_frequency,
+        progress=progress,
+        on_stage=on_stage,
+    )
     run = trial.new_run()
     prov = base_provenance(run.run_id)
     prov.protocol = {
@@ -419,9 +490,17 @@ def analyze(
         "sha256": protocol.source_sha256,
         "source": protocol.source_path,
     }
-    track, _reused = extract_pose(
-        trial, backend, prov, reuse=opts.reuse_pose, progress=progress, on_stage=on_stage
-    )
+    with backend_cm as be:  # sessions are released as soon as extraction is done
+        pose_info = be.info  # kept for the methods text after the sessions are closed
+        track, _reused = extract_pose(
+            trial,
+            be,
+            prov,
+            reuse=opts.reuse_pose,
+            progress=progress,
+            on_stage=on_stage,
+            preview=preview,
+        )
 
     warnings: list[str] = []
     checks: list[Q.QualityCheck] = Q.check_capture(cam, protocol)
@@ -474,25 +553,7 @@ def analyze(
     angles = compute_angles(pre.filtered, angle_names, side="near")
     angles_raw = compute_angles(pre.raw, angle_names, side=angles.side)
 
-    # 4b. pixel -> metre scale (optional, needs the subject's height)
     scale = None
-    if protocol.scale.method == "subject_height":
-        if capture.subject.height_m:
-            try:
-                scale = build_scale(
-                    pre.filtered,
-                    fps=cam.fps,
-                    height_m=capture.subject.height_m,
-                    floor_angle=protocol.scale.floor_angle,
-                )
-                prov.preprocess["scale"] = scale.to_dict()
-            except ValueError as e:
-                warnings.append(f"scale unavailable: {e}")
-        else:
-            warnings.append(
-                "subject height not recorded; distances and speed are reported as unavailable "
-                "(pass --height-m)"
-            )
 
     # 5. segment
     stage("segmenting")
@@ -514,12 +575,7 @@ def analyze(
     )
     prov.segmenter = {"name": seg_entry.name, "version": seg_entry.version, "params": seg_params}
     warnings += list(getattr(events, "warnings", []))
-    family = protocol.protocol.family
-    if family == "gait":
-        checks += Q.check_gait(
-            events, single, protocol, min_cycles=int(seg_params.get("min_cycles", 3))
-        )
-    expected = int(seg_params.get("n_reps_expected", -1)) if family != "gait" else -1
+    expected = int(seg_params.get("n_reps_expected", -1))
     if expected > 0:
         n = getattr(events, "n_reps", 0)
         checks.append(
@@ -534,6 +590,17 @@ def analyze(
                     f"{n} repetitions detected but the protocol expects {expected}; "
                     "check the overlay and the trajectory figure."
                 ),
+            )
+        )
+    if getattr(events, "truncated", False):  # [REVIEW]
+        checks.append(
+            Q.QualityCheck(
+                name="test_truncated",
+                status="fail",
+                value=None,
+                threshold=None,
+                message="the test starts or ends at the clip boundary, so the primary timing is "
+                "not trustworthy; re-record with two seconds of stillness before and after.",
             )
         )
     quality = Q.combine(checks)
@@ -580,37 +647,6 @@ def analyze(
     figures: list[Figure] = []
     thumbs: list[Figure] = []
     fig_dir = run.path / "figures"
-    if family == "gait" and hasattr(events, "signals"):
-        fig_gait_events(events, fig_dir / "gait_events.png")
-        figures.append(
-            Figure(
-                name="gait_events",
-                path="figures/gait_events.png",
-                caption=(
-                    "Heel and toe positions relative to the pelvis along the walking direction; "
-                    "▼ heel strikes, ▲ toe-offs; grey = walking bouts; "
-                    "dashed = steady-state window."
-                ),
-            )
-        )
-        if getattr(events, "n_cycles", 0):
-            fig_gait_cycles(
-                angles.frame,
-                events,
-                angles.side,
-                fig_dir / "gait_cycles.png",
-                names=[a for a in protocol.report.angles if a in angles.names],
-            )
-            figures.append(
-                Figure(
-                    name="gait_cycles",
-                    path="figures/gait_cycles.png",
-                    caption=(
-                        f"Angles over the gait cycle ({angles.side} side), mean ± SD across "
-                        "steady cycles; dotted = mean toe-off."
-                    ),
-                )
-            )
     if hasattr(events, "height_norm"):
         fig_sts_trajectory(events, fig_dir / "sts_trajectory.png")
         figures.append(
@@ -650,7 +686,7 @@ def analyze(
             ),
         )
     )
-    if video.exists() and getattr(events, "reps", None) and family != "gait":
+    if video.exists() and getattr(events, "reps", None):
         for r in events.reps:
             p = fig_dir / f"seat_off_{r.index + 1}.jpg"
             try:
@@ -690,12 +726,13 @@ def analyze(
         "failed": [c.name for c in quality.failures],
         "warned": [c.name for c in quality.warnings],
         "primary_person": pid,
-        "n_persons": track.n_persons,
+        "n_persons": track.n_persons_real,
+        "n_tracks": track.n_persons,
     }
     methods = [
         (
-            f"Pose: {backend.info.pose_name} ({backend.info.layout}) with {backend.info.det_name} "
-            f"detector every {backend.info.det_frequency} frames, {backend.info.runtime}."
+            f"Pose: {pose_info.pose_name} ({pose_info.layout}) with {pose_info.det_name} "
+            f"detector every {pose_info.det_frequency} frames, {pose_info.runtime}."
         ),
         (
             f"Preprocessing: keypoints below confidence {pcfg.score_threshold} removed; gaps up to "

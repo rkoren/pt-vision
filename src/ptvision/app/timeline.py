@@ -1,14 +1,12 @@
-"""Joint-angle timeline synced to the playhead (pyqtgraph)"""
+"""Joint-angle timeline synced to the player"""
 
 from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
 
 from ptvision.app.session import TrialSession
-from ptvision.viz import status as vs
 
 PHASE_COLORS = {
     "rise": (200, 230, 201, 110),
@@ -19,10 +17,10 @@ PHASE_COLORS = {
 }
 
 
-class AngleTimeline(pg.GraphicsLayoutWidget):  # type: ignore[misc]
+class AngleTimeline(pg.GraphicsLayoutWidget):
     seekRequested = Signal(int)
 
-    def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setBackground("#1a1b1e")
         self._session: TrialSession | None = None
@@ -148,7 +146,3 @@ class AngleTimeline(pg.GraphicsLayoutWidget):  # type: ignore[misc]
         """Programmatic equivalent of a click, used by tests."""
         if self._session is not None:
             self.seekRequested.emit(round(seconds * self._session.fps))
-
-
-def status_qcolor(s: float) -> QColor:
-    return QColor(*vs.status_rgb(s).tolist())

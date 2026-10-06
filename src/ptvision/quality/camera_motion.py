@@ -15,24 +15,21 @@ def estimate_camera_motion(
     width: int = 320,
     min_response: float = 0.2,
 ) -> dict[str, float]:
-    """Median and 95th-percentile translation (px at full resolution) between sampled frames.
-
-    Featureless or heavily changed frame pairs give a flat correlation surface (low response) and a
-    meaningless peak, so only well-supported estimates count; with fewer than three of them the
-    result is flagged `unreliable`.
-    """
+    """Median and 95th-percentile translation (px at full resolution) between sampled frames"""
     import cv2
 
-    from ptvision.io.video import iter_frames
+    from ptvision.video import iter_frames
 
     prev: np.ndarray | None = None
     shifts: list[float] = []
     scale = 1.0
     samples = 0
+    long_side = 0.0
     for idx, frame in iter_frames(video_path):
         if idx % step:
             continue
         h, w = frame.shape[:2]
+        long_side = float(max(h, w))
         scale = w / width
         small = cv2.resize(frame, (width, int(h / scale)), interpolation=cv2.INTER_AREA)
         gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
@@ -46,10 +43,22 @@ def estimate_camera_motion(
                 break
         prev = gray
     if len(shifts) < 3:
-        return {"median_px": 0.0, "p95_px": 0.0, "n": float(len(shifts)), "unreliable": 1.0}
+        return {
+            "median_px": 0.0,
+            "p95_px": 0.0,
+            "n": float(len(shifts)),
+            "unreliable": 1.0,
+            "long_side": long_side,
+        }
     return {
         "median_px": float(np.median(shifts)),
         "p95_px": float(np.percentile(shifts, 95)),
         "n": float(len(shifts)),
         "unreliable": 0.0,
+        "long_side": long_side,
     }
+
+
+def motion_threshold_px(long_side: float) -> float:
+    """warn threshold as a fraction of the frame's long side"""
+    return max(2.0, 0.004 * long_side)

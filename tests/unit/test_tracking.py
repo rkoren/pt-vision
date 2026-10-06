@@ -81,3 +81,60 @@ def test_select_primary_prefers_present_and_large() -> None:
             coords[i, 1] = skeleton(800, 300, scale=200)  # bigger but present 1/3 of the time
             score[i, 1] = 0.9
     assert select_primary_person(coords, score) == 0
+
+
+def test_spurious_slots_flags_short_and_low_score_tracks() -> None:
+    # [REVIEW] B56: one real person for 3 s, a 6-frame ghost, and a low-confidence ghost
+    from ptvision.pose.tracking import spurious_slots
+
+    t, k = 90, 26
+    coords = np.full((t, 3, k, 2), np.nan, dtype=np.float32)
+    score = np.zeros((t, 3, k), dtype=np.float32)
+    coords[:, 0] = 100.0 + np.arange(k)[None, :, None]
+    score[:, 0] = 0.8
+    coords[10:16, 1] = 400.0
+    score[10:16, 1] = 0.7  # short-lived
+    coords[:, 2] = 700.0
+    score[:, 2] = 0.25  # present but never confident
+    mask = spurious_slots(coords, score, fps=30)
+    assert mask.tolist() == [False, True, True]
+    # a clip whose only track is weak still keeps it
+    only = spurious_slots(coords[:, 2:3], score[:, 2:3], fps=30)
+    assert only.tolist() == [False]
+
+
+def test_stitch_tracks_joins_fragments_across_a_detection_gap() -> None:
+    # [REVIEW] demo MVP: one person seen as slot 0 (frames 0-39), lost for 12 frames, back as slot 1
+    from ptvision.pose.tracking import stitch_tracks
+
+    t, k = 100, 26
+    coords = np.full((t, 2, k, 2), np.nan, dtype=np.float32)
+    score = np.zeros((t, 2, k), dtype=np.float32)
+    base = np.stack([np.linspace(300, 320, t), np.linspace(400, 420, t)], axis=1)[:, None, :]
+    coords[:40, 0] = base[:40] + np.arange(k)[None, :, None]
+    score[:40, 0] = 0.8
+    coords[52:, 1] = base[52:] + np.arange(k)[None, :, None]
+    score[52:, 1] = 0.8
+    out_c, _ = stitch_tracks(coords, score, fps=30, image_size=(1280, 720))
+    assert out_c.shape[1] == 1
+    present = ~np.isnan(out_c[:, 0]).all(axis=(1, 2))
+    assert present[:40].all() and present[52:].all() and not present[40:52].any()
+    # a fragment far away (another person) is not merged
+    far = coords.copy()
+    far[52:, 1, :, 0] += 900
+    out_c2, _ = stitch_tracks(far, score.copy(), fps=30, image_size=(1280, 720))
+    assert out_c2.shape[1] == 2
+
+
+def test_dedupe_persons_drops_overlapping_copy_keeps_distinct() -> None:
+    from ptvision.pose.rtmlib_backend import dedupe_persons
+
+    k = 26
+    a = np.stack([np.linspace(100, 200, k), np.linspace(100, 400, k)], axis=1).astype(np.float32)
+    b = a + 5  # near-identical copy
+    c = a + np.array([600, 0], np.float32)  # another person far away
+    kpts = np.stack([a, b, c])
+    scores = np.array([[0.6] * k, [0.9] * k, [0.7] * k], np.float32)
+    out_k, out_s = dedupe_persons(kpts, scores)
+    assert out_k.shape[0] == 2
+    assert np.allclose(out_s[:, 0], [0.9, 0.7])  # the better copy survives, input order kept

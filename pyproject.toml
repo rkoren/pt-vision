@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ptvision"
 version = "0.1.0"
-description = "Open computer-vision measurement tools to assist physical therapists. Not a medical device."
+description = "CV tool to assist PTs"
 readme = "README.md"
 license = "Unlicense"
 license-files = ["LICENSE", "NOTICE", "src/ptvision/_vendor/pose2sim/LICENSE"]
@@ -74,8 +74,6 @@ Repository = "https://github.com/rkoren/pt-vision"
 packages = ["src/ptvision"]
 
 [tool.uv]
-# rtmlib declares both opencv-python and opencv-contrib-python, which install the same `cv2`
-# package on top of each other. rtmlib only uses core cv2 calls, so drop the contrib wheel.
 override-dependencies = ["opencv-contrib-python ; sys_platform == 'never'"]
 
 [tool.ruff]
@@ -109,5 +107,5 @@ ignore_missing_imports = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["ptvision.clinical.*", "ptvision.data.*"]
+module = ["ptvision.clinical.*", "ptvision.trials.*"]
 strict = true

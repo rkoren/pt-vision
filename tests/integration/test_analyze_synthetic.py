@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ptvision.io.jsonio import read_json
+from ptvision.files import read_json
 from ptvision.pipeline import AnalyzeOptions, analyze
 from tests.synthetic import FakeBackend, StsTimeline, synth_video, synthetic_sts_track
 
@@ -67,7 +67,8 @@ def test_analyze_sts_5x_synthetic(tmp_path: Path) -> None:
     res2 = analyze(
         out, AnalyzeOptions(protocol="sts_5x", overlay=False), backend=FakeBackend(track)
     )
-    assert read_json(res2.run.path / "provenance.json")["timing_s"]["pose"] < 0.5
+    # the reuse flag, not wall time: a cold first run on a busy laptop took 1.2 s (handoff eval 2)
+    assert read_json(res2.run.path / "provenance.json")["pose_reused"] is True
     assert res2.trial.latest_run().run_id == res2.run.run_id
 
 

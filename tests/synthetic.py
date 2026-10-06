@@ -171,12 +171,14 @@ class FakeBackend:
             runtime="none",
         )
 
-    def estimate(self, frames, *, fps, image_size, n_frames=None, progress=None):  # type: ignore[no-untyped-def]
+    def estimate(self, frames, *, fps, image_size, n_frames=None, progress=None, preview=None):  # type: ignore[no-untyped-def]
         count = 0
-        for idx, _frame in frames:
+        for idx, frame in frames:
             count = idx + 1
             if self.delay_s:
                 time.sleep(self.delay_s)
+            if preview is not None and idx < self._track.n_frames:
+                preview(idx, frame, self._track.coords[idx], self._track.score[idx])
             if progress is not None:
                 progress(count, n_frames)
         n = count

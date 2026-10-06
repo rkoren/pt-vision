@@ -18,6 +18,19 @@ from tests.synthetic import FakeBackend, StsTimeline, synth_video, synthetic_sts
 
 pytestmark = pytest.mark.qt
 
+
+@pytest.fixture(autouse=True)
+def _isolated_qsettings(tmp_path_factory):
+    """Keep QSettings writes out of the user's real preferences (handoff evaluation 4 found a
+    test-written age remembered by the real app)."""
+    from PySide6.QtCore import QSettings
+
+    d = tmp_path_factory.mktemp("qsettings")
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(d))
+    yield
+
+
 TIGHT_RULES = """
 [[rules]]
 angle = "trunk_lean"

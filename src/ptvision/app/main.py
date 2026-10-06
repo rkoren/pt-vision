@@ -1,4 +1,4 @@
-"""Main window: drop a video → progress → viewer."""
+"""Main window"""
 
 from __future__ import annotations
 
@@ -7,36 +7,37 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QKeyEvent, QKeySequence
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QAction,
+    QDragEnterEvent,
+    QDropEvent,
+    QKeyEvent,
+    QKeySequence,
+)
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
-    QComboBox,
     QFileDialog,
-    QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QProgressBar,
-    QPushButton,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ptvision._version import __version__
+from ptvision.app.pages import DropPage, ProgressPage
 from ptvision.app.panel import SidePanel
 from ptvision.app.player import Player
 from ptvision.app.session import TrialSession
 from ptvision.app.timeline import AngleTimeline
 from ptvision.app.view import VideoView
 from ptvision.app.worker import JobSpec, PipelineWorker, WorkerResult
-from ptvision.clinical.protocol import builtin_protocol_ids
-from ptvision.io.video import FrameSource
 from ptvision.pose.base import PoseBackend
+from ptvision.trials.models import Subject
+from ptvision.video import FrameSource
 from ptvision.viz import status as vs
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mts", ".3gp"}
@@ -45,79 +46,6 @@ BackendFactory = Callable[[], PoseBackend | None]
 
 def _is_trial_dir(p: Path) -> bool:
     return p.is_dir() and (p / "capture.json").exists()
-
-
-class DropPage(QWidget):
-    def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint = QLabel(
-            "<h2>Drop a video here</h2>"
-            "<p>or a trial folder from a previous run.<br>"
-            "The video is processed on this computer and never uploaded.</p>"
-        )
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint.setStyleSheet("border: 2px dashed #6b7280; border-radius: 14px; padding: 48px;")
-        lay.addWidget(self.hint)
-        row = QHBoxLayout()
-        row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        row.addWidget(QLabel("Protocol:"))
-        self.protocol = QComboBox()
-        self.protocol.addItem("Pose only", "pose")
-        for pid in builtin_protocol_ids():
-            self.protocol.addItem(pid, pid)
-        row.addWidget(self.protocol)
-        self.open_video = QPushButton("Open video…")
-        self.open_trial = QPushButton("Open trial…")
-        row.addWidget(self.open_video)
-        row.addWidget(self.open_trial)
-        lay.addLayout(row)
-        self.note = QLabel(
-            f"<span style='color:#9aa4b2'>ptvision {__version__} · "
-            "measurement tool, not a medical device</span>"
-        )
-        self.note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.note)
-
-    def selected_protocol(self) -> str:
-        return str(self.protocol.currentData())
-
-    def select_protocol(self, pid: str) -> None:
-        idx = self.protocol.findData(pid)
-        if idx >= 0:
-            self.protocol.setCurrentIndex(idx)
-
-
-class ProgressPage(QWidget):
-    def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.file = QLabel("")
-        self.file.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stage = QLabel("starting")
-        self.stage.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stage.setStyleSheet("font-size: 16px; font-weight: 600;")
-        self.bar = QProgressBar()
-        self.bar.setRange(0, 0)
-        self.bar.setFixedWidth(420)
-        self.cancel = QPushButton("Cancel")
-        lay.addWidget(self.file)
-        lay.addWidget(self.stage)
-        lay.addWidget(self.bar, alignment=Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.cancel, alignment=Qt.AlignmentFlag.AlignCenter)
-
-    def set_progress(self, done: int, total: int) -> None:
-        if total > 0:
-            self.bar.setRange(0, total)
-            self.bar.setValue(done)
-        else:
-            self.bar.setRange(0, 0)
-
-    def set_stage(self, name: str) -> None:
-        self.stage.setText(name)
-        self.bar.setRange(0, 0)
 
 
 class MainWindow(QMainWindow):
@@ -131,6 +59,7 @@ class MainWindow(QMainWindow):
         self._session: TrialSession | None = None
         self._player: Player | None = None
         self._job_out: Path | None = None
+        self.screenshot_mode = False  # headless capture: never block on modal dialogs
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -161,12 +90,17 @@ class MainWindow(QMainWindow):
 
         self.drop_page.open_video.clicked.connect(self._choose_video)
         self.drop_page.open_trial.clicked.connect(self._choose_trial)
+        self.drop_page.try_sample.clicked.connect(self.open_sample)
+        self.drop_page.recent.itemActivated.connect(
+            lambda item: self.open_trial(Path(str(item.data(Qt.ItemDataRole.UserRole))))
+        )
         self.progress_page.cancel.clicked.connect(self.cancel_job)
         self.timeline.seekRequested.connect(self._seek)
         self.panel.eventActivated.connect(self._seek)
         self.panel.modeChanged.connect(self._set_mode)
         self.panel.angleToggled.connect(self._angle_toggled)
         self.panel.showOthersToggled.connect(self.view.skeleton.set_show_others)
+        self.panel.smoothToggled.connect(self.view.skeleton.set_smooth)
 
         self._build_actions()
         self.statusBar().showMessage("drop a video to begin")
@@ -290,15 +224,33 @@ class MainWindow(QMainWindow):
     ) -> None:
         protocol = protocol or self.drop_page.selected_protocol()
         if _is_trial_dir(p):
-            from ptvision.data.store import TrialDir
+            from ptvision.trials.store import TrialDir
 
             trial = TrialDir(p)
             if trial.latest_run() is not None and trial.pose_path().exists():
                 self.open_trial(p, run_id=run_id)
                 return
-            self.start_job(JobSpec(p, protocol, out_dir))
+            self.start_job(self._job(p, protocol, out_dir))
             return
-        self.start_job(JobSpec(p, protocol, out_dir))
+        self.start_job(self._job(p, protocol, out_dir))
+
+    def _job(self, p: Path, protocol: str | None, out_dir: Path | None) -> JobSpec:
+        return JobSpec(
+            p,
+            protocol,
+            out_dir,
+            subject=self.drop_page.subject(),
+            max_height=self.drop_page.selected_max_height(),
+        )
+
+    def open_sample(self, name: str | None = None) -> None:
+        """Run the bundled sample clip with its protocol and subject details (demo MVP)."""
+        from ptvision.samples import DEFAULT_SAMPLE, sample
+
+        smp = sample(name or DEFAULT_SAMPLE)
+        self.drop_page.select_protocol(smp.protocol)
+        self.drop_page.set_subject(height_m=smp.height_m, age=smp.age_years, sex=smp.sex)
+        self.open_path(smp.path, protocol=smp.protocol, out_dir=Path("ptv_out") / "sample")
 
     def _choose_video(self) -> None:
         f, _ = QFileDialog.getOpenFileName(
@@ -322,6 +274,8 @@ class MainWindow(QMainWindow):
         self._worker = PipelineWorker(spec, backend=backend, parent=self)
         self._worker.progress.connect(self.progress_page.set_progress)
         self._worker.stage.connect(self.progress_page.set_stage)
+        self._worker.preview.connect(self.progress_page.set_preview)
+        self.progress_page.clear_preview()
         self._worker.finished_ok.connect(self._job_done)
         self._worker.failed.connect(self._job_failed)
         self._worker.cancelled.connect(self._job_cancelled)
@@ -344,7 +298,9 @@ class MainWindow(QMainWindow):
     def _job_failed(self, message: str, tb: str) -> None:
         self._worker = None
         self.stack.setCurrentWidget(self.drop_page)
-        self.statusBar().showMessage("failed")
+        self.statusBar().showMessage(f"failed: {message}")
+        if self.screenshot_mode:
+            return
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Critical)
         box.setWindowTitle("ptvision")
@@ -377,8 +333,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"ptvision — {session.title}")
         self.stack.setCurrentWidget(self.viewer)
         self.view.setFocus()
-        self._on_frame(0)
+        start = session.first_present_frame
+        if start:
+            self._player.seek(start)  # emits frameChanged -> _on_frame
+        else:
+            self._on_frame(0)
         QTimer.singleShot(0, self.view.fit)
+        self.drop_page.remember(trial_dir)
 
     def close_trial(self) -> None:
         if self._player is not None:
@@ -394,6 +355,10 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.drop_page)
 
     @property
+    def job_running(self) -> bool:
+        return self._worker is not None
+
+    @property
     def session(self) -> TrialSession | None:
         return self._session
 
@@ -407,9 +372,11 @@ class MainWindow(QMainWindow):
             return
         self.view.show_frame(t)
         self.timeline.set_frame(t)
-        readout = "  ".join(
-            f"{k.replace('_', ' ')} {v:.0f}°" for k, v in s.angle_readout(t).items()
-        )
+        values = s.angle_readout(t)
+        self.panel.set_readout(values)
+        rep = s.rep_at(t)
+        self.view.set_badge(f"Rep {rep[0]} / {rep[1]}" if rep else None)
+        readout = "  ".join(f"{k.replace('_', ' ')} {v:.0f}°" for k, v in values.items())
         self.statusBar().showMessage(f"frame {t}/{s.n_frames - 1}   {t / s.fps:.2f} s   {readout}")
 
     def _on_playing(self, playing: bool) -> None:
@@ -470,21 +437,85 @@ def main(
     protocol: str = "pose",
     out_dir: Path | None = None,
     run_id: str | None = None,
+    subject: Subject | None = None,
+    max_height: int | None = None,
+    hard_exit: bool = True,
 ) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("ptvision")
     win = MainWindow()
+    if subject is not None:
+        win.drop_page.set_subject(height_m=subject.height_m, age=subject.age_years, sex=subject.sex)
+    if max_height:
+        win.drop_page.max_height_box.setCurrentIndex(
+            max(0, win.drop_page.max_height_box.findData(int(max_height)))
+        )
     win.show()
     if source is not None:
         win.drop_page.select_protocol(protocol)
         win.open_path(Path(source), protocol=protocol, run_id=run_id, out_dir=out_dir)
     shot = os.environ.get("PTV_APP_SCREENSHOT")
     if shot:
-        delay = int(os.environ.get("PTV_APP_SCREENSHOT_DELAY_MS", "2500"))
+        win.screenshot_mode = True
+        arm_screenshot(
+            app,
+            win,
+            Path(shot),
+            expect_viewer=source is not None,
+            delay_ms=int(os.environ.get("PTV_APP_SCREENSHOT_DELAY_MS", "1500")),
+            timeout_ms=int(os.environ.get("PTV_APP_SCREENSHOT_TIMEOUT_MS", "900000")),
+        )
+    code = app.exec()
+    if hard_exit:
+        # [REVIEW] in the app: after the event loop ends, interpreter teardown races ONNX
+        # Runtime's worker threads (created inside the QThread job) and aborts with
+        # "recursive_mutex lock failed" once the report is already written. Everything is flushed
+        # and saved by now, so skip teardown. Tests call main() with hard_exit=False.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+    return code
 
-        def grab() -> None:
-            win.grab().save(shot)
-            app.quit()
 
-        QTimer.singleShot(delay, grab)
-    return app.exec()
+def arm_screenshot(
+    app: QCoreApplication,
+    win: MainWindow,
+    path: Path,
+    *,
+    expect_viewer: bool,
+    delay_ms: int = 1500,
+    timeout_ms: int = 900_000,
+    poll_ms: int = 200,
+    on_done: Callable[[int], None] | None = None,
+) -> None:
+    """[REVIEW]. Save a PNG of the window and quit with a meaningful exit code.
+
+    With a video source the pipeline runs first, so the old fixed 2.5 s timer captured the
+    progress page. Now: wait until the viewer page is showing (or the job has ended without it),
+    then ``delay_ms`` later grab the window. Exit 0 on success, 2 if the PNG could not be written,
+    3 if the viewer never appeared (the current page is still saved so the failure is visible).
+    """
+    elapsed = 0
+    finish = on_done or app.exit  # tests pass a recorder: app.exit() poisons later event loops
+
+    def grab(code: int) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ok = win.grab().save(str(path))
+        finish(code if ok else 2)
+
+    def poll() -> None:
+        nonlocal elapsed
+        elapsed += poll_ms
+        if win.stack.currentWidget() is win.viewer:
+            QTimer.singleShot(delay_ms, lambda: grab(0))
+        elif elapsed >= timeout_ms or (
+            win.stack.currentWidget() is win.drop_page and not win.job_running
+        ):
+            grab(3)
+        else:
+            QTimer.singleShot(poll_ms, poll)
+
+    if expect_viewer:
+        QTimer.singleShot(poll_ms, poll)
+    else:
+        QTimer.singleShot(delay_ms, lambda: grab(0))

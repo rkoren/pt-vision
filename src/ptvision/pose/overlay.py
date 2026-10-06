@@ -1,10 +1,4 @@
-"""Skeleton overlay rendering (OpenCV) for QA videos and report thumbnails.
-
-Colors come from `ptvision.viz.status` so the CLI overlay and the desktop app render the same:
-Colors come from `ptvision.viz.status` so the CLI overlay and the desktop app render
-the same:
-assesses, dimmed for low confidence, hidden below the confidence floor.
-"""
+"""Skeleton overlay rendering (OpenCV) for QA videos and report thumbnails"""
 
 from __future__ import annotations
 
@@ -12,10 +6,10 @@ from pathlib import Path
 
 import numpy as np
 
-from ptvision.io.video import FrameWriter, iter_frames
 from ptvision.pose.base import ProgressFn
 from ptvision.pose.layout import KeypointLayout
 from ptvision.pose.track import PoseTrack
+from ptvision.video import FrameWriter, iter_frames
 from ptvision.viz import status as vs
 from ptvision.viz.skeleton import bone_segments
 
@@ -45,8 +39,10 @@ def draw_pose(
     bone_colors: np.ndarray | None = None,
     bone_visible: np.ndarray | None = None,
     mode: vs.Mode = "confidence",
+    hidden: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Draw all persons for one frame. coords (P, K, 2), score (P, K).
+    """Draw all persons for one frame. coords (P, K, 2), score (P, K). `hidden` (P,) bool skips
+    slots (spurious tracks).
 
     `bone_colors` (B, 3) RGB and `bone_visible` (B,) apply to the primary person (from
     `BoneStatus.colors`); without them the primary's bones are colored by joint confidence.
@@ -62,7 +58,7 @@ def draw_pose(
     for p in range(coords.shape[0]):
         c = coords[p]
         s = score[p]
-        if np.isnan(c).all():
+        if np.isnan(c).all() or (hidden is not None and hidden[p]):
             continue
         is_primary = primary is None or int(person_ids[p]) == primary
         if is_primary:
@@ -203,6 +199,7 @@ def render_overlay(
                     bone_colors=colors,
                     bone_visible=visible,
                     mode=mode,
+                    hidden=track.spurious,
                 )
             if legend:
                 draw_legend(frame, mode)
@@ -235,7 +232,7 @@ def thumbnail(
 ) -> Path:
     import cv2
 
-    from ptvision.io.video import read_frame
+    from ptvision.video import read_frame
 
     frame = read_frame(video_path, frame_index)
     draw_pose(

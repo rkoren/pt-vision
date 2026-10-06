@@ -4,7 +4,8 @@ Matches the setups validated in Bertrand et al. 2026 (n=228, ICC 0.995 vs clinic
 Hwang et al. 2026 (2D RGB, knee RMSE 5.9°, trunk RMSE 4.0°).
 
 **Camera**
-- Phone in landscape on a tripod, lens about 0.8 m above the floor.
+- Phone in landscape on a tripod, lens about 0.8 m above the floor. Portrait also works (it is
+  rotated on ingest) but leaves less room for the chair and feet.
 - About 3 m from the chair, perpendicular to the person's side (sagittal view). Either side is fine;
   the report says which side was analysed.
 - Whole body, both feet, and the chair seat in frame for the entire test. Nothing between the camera
@@ -32,6 +33,7 @@ top is inside the 30 s window starting at the first seat-off (or at `--t0` if yo
 
 **What ptvision refuses or flags**
 - Frontal view, subject leaving the frame, fewer/more than the expected repetitions: report marked `fail`.
-- Another person in frame, camera moving, low resolution, variable frame rate: `warn`.
+- Camera off the side axis (three-quarter view): `warn`; timings are still usable, joint angles are
+  less reliable. Another person in frame, camera moving, low resolution, variable frame rate: `warn`.
 
 Run: `ptv analyze clip.mov --protocol sts_5x --age 71 --height-m 1.68 --sex f`

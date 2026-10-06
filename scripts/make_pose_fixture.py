@@ -1,9 +1,4 @@
-"""Turn a trial's pose Parquet into a small committed test fixture (primary person only).
-
-Usage:
-    uv run python scripts/make_pose_fixture.py ptv_out/<clip>/pose/cam0.parquet \\
-        tests/fixtures/<name>.parquet
-"""
+"""Turn a trial's pose Parquet into test fixture"""
 
 from __future__ import annotations
 

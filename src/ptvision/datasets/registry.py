@@ -1,4 +1,4 @@
-# [REVIEW] new file (BACKLOG B29)
+# [REVIEW] new file
 """Dataset manifest, download, verification, and provenance.
 
 Datasets live under `$PTV_DATASETS_DIR/<name>/` (default `~/ptvision-data/datasets`):
@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import http.client
 import os
-import shutil
 import ssl
 import time
 import tomllib
@@ -26,7 +25,7 @@ from pathlib import Path
 
 import certifi
 
-from ptvision.io.jsonio import read_json, write_json
+from ptvision.files import read_json, write_json
 
 ProgressFn = Callable[[str, int, int | None], None]
 
@@ -214,11 +213,36 @@ def pull(
     prov = read_json(dirs.provenance) if dirs.provenance.exists() else {}
     files_prov: dict[str, dict[str, object]] = dict(prov.get("files", {}))
 
+    def _save_provenance() -> None:
+        write_json(
+            dirs.provenance,
+            {
+                "name": spec.dir_name,
+                "title": spec.title,
+                "citation": spec.citation,
+                "source": spec.source,
+                "license": spec.license,
+                "license_url": spec.license_url,
+                "kind": spec.kind,
+                "notes": spec.notes,
+                "files": files_prov,
+                "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            },
+        )
+
     for f in spec.files:
         dst = dirs.raw / f.name
-        if dst.exists() and (
-            not verify or not f.md5 or files_prov.get(f.name, {}).get("md5") == f.md5
-        ):
+        # A file already on disk is kept when its checksum is known-good. The checksum is
+        # recomputed when provenance has no record of it: a pull interrupted on a later file used
+        # to lose the record and download finished archives again (10 GB wasted on COMFI video).
+        have = dst.exists() and (
+            not verify
+            or not f.md5
+            or files_prov.get(f.name, {}).get("md5") == f.md5
+            or md5_file(dst) == f.md5
+        )
+        if have:
+            dst.with_name(dst.name + ".part").unlink(missing_ok=True)
             res.skipped.append(f.name)
         else:
             _download(f.url, dst, expected=f.size, label=f.name, progress=progress)
@@ -243,22 +267,9 @@ def pull(
                 _extract(dst, dirs.raw / dst.stem)
                 marker.write_text(datetime.now(UTC).isoformat(timespec="seconds"))
                 res.extracted.append(f.name)
+        _save_provenance()  # after every file, so an interrupted pull keeps its progress
 
-    write_json(
-        dirs.provenance,
-        {
-            "name": spec.dir_name,
-            "title": spec.title,
-            "citation": spec.citation,
-            "source": spec.source,
-            "license": spec.license,
-            "license_url": spec.license_url,
-            "kind": spec.kind,
-            "notes": spec.notes,
-            "files": files_prov,
-            "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        },
-    )
+    _save_provenance()
     return res
 
 
@@ -274,9 +285,3 @@ def status(spec: DatasetSpec) -> dict[str, object]:
         "dir": str(dirs.root),
         "provenance": dirs.provenance.exists(),
     }
-
-
-def remove_derived(spec: DatasetSpec) -> None:
-    d = DatasetDirs.for_spec(spec).derived
-    if d.exists():
-        shutil.rmtree(d)

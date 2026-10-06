@@ -68,7 +68,7 @@ name = "peak_trunk_lean_rising"
 name = "knee_flexion_at_seat_off"
 
 # Angle bands used to colour the skeleton (1 = in range, 0.5 = at the warn edge, 0 = beyond).
-# Provisional values from healthy sit-to-stand descriptions; confirm with the PT partner (backlog B02).
+# Provisional values from healthy sit-to-stand descriptions; confirm with the PT partner.
 [[rules]]
 angle = "trunk_lean"
 label = "Trunk forward lean"

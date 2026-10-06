@@ -1,8 +1,4 @@
-"""Pydantic records written to disk.
-
-Capture facts (immutable per trial) are kept separate from runs
-so that re-running with a newer model doesn't overwrites what was recorded.
-"""
+"""Pydantic records written to disk"""
 
 from __future__ import annotations
 
@@ -81,13 +77,14 @@ class RunProvenance(BaseModel):
     quality: dict[str, object] = Field(default_factory=dict)
     pose_parquet: str | None = None
     pose_parquet_sha256: str | None = None
+    pose_reused: bool = False  # keypoints loaded from a previous run with matching model
     timing_s: dict[str, float] = Field(default_factory=dict)
 
 
 class Patient(BaseModel):
     schema_version: int = SCHEMA_VERSION
     patient_id: str
-    label: str  # pseudonymous label chosen by the clinician, never a real name
+    label: str  # don't use real names
     created_at: str
     subject: Subject = Field(default_factory=Subject)
     notes: str | None = None

@@ -1,9 +1,4 @@
-"""Confidence gating, gap interpolation, outlier rejection and zero-phase low-pass filtering.
-
-Defaults follow the biomechanics convention used by Pose2Sim/Sports2D: Hampel outlier rejection
-(window 7, 2 sigma) then a zero-phase Butterworth low-pass, "4th order 6 Hz" meaning a 2nd-order
-design applied forward and backward (`scipy.signal.filtfilt`).
-"""
+"""Confidence gating, gap interpolation, outlier rejection and zero-phase low-pass filtering."""
 
 from __future__ import annotations
 

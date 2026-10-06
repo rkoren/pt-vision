@@ -116,3 +116,17 @@ def test_segmenter_on_track_with_lean_onset() -> None:
         trunk_lean=angles["trunk_lean"],
     )
     assert ev_lean.test_start <= ev.test_start
+
+
+def test_truncated_clip_flags_and_warns() -> None:
+    # [REVIEW] B60: recording that stops on the fifth stand (session-1 clips) is flagged
+    tl = StsTimeline()
+    h, _ = tl.build()
+    cut = h[: tl.stand_reached[-1] + 2]
+    ev = segment_sts_signal(cut, tl.fps, StsParams())
+    assert ev.n_reps == 5
+    assert ev.truncated
+    assert any("clip end" in w for w in ev.warnings)
+    assert ev.to_dict()["truncated"] is True
+    full = segment_sts_signal(h, tl.fps, StsParams())
+    assert not full.truncated

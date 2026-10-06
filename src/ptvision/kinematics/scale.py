@@ -1,6 +1,6 @@
 """Pixel-to-metre scaling for a single sagittal camera.
 
-Method adapted from Sports2D / Pose2Sim (BSD-3-Clause, David Pagnon; see NOTICE):
+Method from Sports2D / Pose2Sim (BSD-3-Clause, David Pagnon):
 - body height in pixels = sum of segment lengths (foot, shank, thigh, trunk, head) measured on
 frames
   where the hips and knees are close to extended, combined with a trimmed mean; divided by the
@@ -25,7 +25,7 @@ import numpy as np
 from ptvision.kinematics.angles import compute_angles
 from ptvision.pose.track import PoseTrack
 
-WINTER_LEG_TO_HEIGHT = 0.485  # leg length / stature (Winter 2009), Pose2Sim fallback
+WINTER_LEG_TO_HEIGHT = 0.485  # leg length / stature (Winter 2009), used as a fallback
 
 
 @dataclass
@@ -159,11 +159,7 @@ def estimate_floor(
     toe_speed_below_m_s: float = 1.0,
     score_threshold: float = 0.5,
 ) -> tuple[float, tuple[float, float], int, list[str]]:
-    """Floor angle (rad, positive = floor rises to image-right) and origin from stationary toes.
-
-    Adapted from Sports2D `compute_floor_line`: collect big-toe positions whose speed is below
-    `toe_speed_below_m_s`, fit a line; fall back to ankles offset by 13 cm. Returns
-    (angle_rad, (cx, cy), n_points, notes)."""
+    """Calculate floor angle"""
     notes: list[str] = []
     lay = track.layout
     names = (
@@ -174,7 +170,7 @@ def estimate_floor(
     offset_px = 0.0
     if names[0] == "LAnkle":
         offset_px = 0.13 * px_per_m
-        notes.append("toe keypoints missing; ankles + 13 cm used for the floor line")
+        notes.append("toe keypoints missing, so ankles + 13 cm used for the floor line")
     thr = toe_speed_below_m_s * px_per_m / fps
     xs: list[float] = []
     ys: list[float] = []
@@ -216,7 +212,7 @@ def build_scale(
     height_m: float,
     floor_angle: Literal["auto"] | float = "auto",
 ) -> ScaleModel:
-    """Full scale model for a single-person track given the subject's height."""
+    """Full scale model given the subject's height"""
     if not (0.5 < height_m < 2.6):
         raise ValueError(f"implausible subject height {height_m} m")
     h_px, n_used, notes = estimate_height_px(track)

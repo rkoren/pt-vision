@@ -1,5 +1,5 @@
 """Decorator registries for segmenters and metrics, so protocols can reference them by name and a
-test can assert every tier-1 metric carries a citation and a method version."""
+test can assert every tier-1 metric carries a citation and a method version"""
 
 from __future__ import annotations
 

@@ -4,7 +4,7 @@ import ptvision.clinical as clinical
 from ptvision.clinical.metrics.base import Metric
 from ptvision.clinical.norms import compare, load_norms
 from ptvision.clinical.protocol import builtin_protocol_ids, load_protocol
-from ptvision.data.models import Subject
+from ptvision.trials.models import Subject
 
 
 def test_protocols_reference_registered_names_and_norms() -> None:

@@ -5,11 +5,11 @@ import os
 import numpy as np
 import pytest
 
-from ptvision.io.video import iter_frames, probe
 from ptvision.pose.layout import HALPE26
 from ptvision.pose.models import ModelManager
 from ptvision.pose.rtmlib_backend import RtmlibBackend
 from ptvision.pose.tracking import select_primary_person
+from ptvision.video import iter_frames, probe
 
 pytestmark = [pytest.mark.model, pytest.mark.ffmpeg]
 

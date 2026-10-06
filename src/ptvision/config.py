@@ -1,4 +1,4 @@
-"""Process-wide settings, resolved from environment variables with sensible defaults.
+"""Process-wide settings
 
 PTV_DATA_DIR       root of the patient/visit/trial store (default ~/ptvision-data)
 PTV_MODEL_DIR      where ONNX weights are cached (default <user cache>/ptvision/models)

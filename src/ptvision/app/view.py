@@ -1,15 +1,15 @@
-"""Video frame + skeleton overlay in a zoomable, fit-to-window QGraphicsView"""
+"""Video frame + skeleton overlay in a zoomable view"""
 
 from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QPainter, QPixmap, QResizeEvent, QWheelEvent
-from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QLabel
 
 from ptvision.app.overlay import SkeletonItem
 from ptvision.app.session import TrialSession
-from ptvision.io.video import FrameSource
+from ptvision.video import FrameSource
 
 _NAV_KEYS = {
     Qt.Key.Key_Left,
@@ -36,6 +36,14 @@ class VideoView(QGraphicsView):
         self._scene.addItem(self._pix_item)
         self.skeleton = SkeletonItem()
         self._scene.addItem(self.skeleton)
+        # rep badge
+        self.badge = QLabel(self.viewport())
+        self.badge.setStyleSheet(
+            "background: rgba(20, 22, 26, 170); color: white; font-size: 18px; font-weight: 600;"
+            " padding: 4px 10px; border-radius: 8px;"
+        )
+        self.badge.move(12, 12)
+        self.badge.hide()
         self._session: TrialSession | None = None
         self._source: FrameSource | None = None
         self._frame: np.ndarray | None = None  # keep the array alive while displayed
@@ -65,6 +73,15 @@ class VideoView(QGraphicsView):
             self.fit()
         else:
             self._pix_item.setPixmap(QPixmap())
+
+    def set_badge(self, text: str | None) -> None:
+        if text:
+            self.badge.setText(text)
+            self.badge.adjustSize()
+            self.badge.show()
+            self.badge.raise_()
+        else:
+            self.badge.hide()
 
     def close_source(self) -> None:
         if self._source is not None:
@@ -131,7 +148,7 @@ class VideoView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        # Navigation keys belong to the window's playback actions, not to the scroll area.
+        # navigation keys go to the window's playback actions
         if event.key() in _NAV_KEYS:
             event.ignore()
             return

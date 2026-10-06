@@ -88,3 +88,23 @@ def test_empty_track_roundtrip(tmp_path) -> None:
 def test_shape_validation() -> None:
     with pytest.raises(ValueError):
         PoseTrack(HALPE26, 30.0, np.zeros((3, 1, 17, 2)), np.zeros((3, 1, 17)), np.array([0]))
+
+
+def test_spurious_mask_survives_parquet_roundtrip(tmp_path) -> None:
+    # [REVIEW] B56
+    import numpy as np
+
+    from ptvision.pose.layout import HALPE26
+    from ptvision.pose.track import PoseTrack
+
+    coords = np.zeros((4, 3, HALPE26.n, 2), dtype=np.float32)
+    score = np.full((4, 3, HALPE26.n), 0.9, dtype=np.float32)
+    tr = PoseTrack(HALPE26, 30.0, coords, score, np.array([0, 1, 2]))
+    tr.mark_spurious(np.array([False, False, False]))  # explicit: nothing spurious
+    assert tr.spurious.tolist() == [False, False, False] and tr.n_persons_real == 3
+    tr.mark_spurious(np.array([False, True, True]))
+    p = tmp_path / "t.parquet"
+    tr.save(p)
+    back = PoseTrack.load(p)
+    assert back.spurious.tolist() == [False, True, True]
+    assert back.n_persons_real == 1 and back.n_persons == 3

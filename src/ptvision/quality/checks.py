@@ -1,17 +1,17 @@
-"""Quality checks on capture metadata and the raw pose track. Each check yields pass / warn / fail
-with the measured value, the threshold, and a plain-language reason a clinician can act on."""
+"""Quality checks on capture metadata. Each check gives pass / warn / fail
+with the measured value, the threshold, and reasoning why"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
 
 from ptvision.clinical.protocol import Protocol
-from ptvision.data.models import CameraCapture
 from ptvision.pose.track import PoseTrack
+from ptvision.trials.models import CameraCapture
 
 Status = Literal["pass", "warn", "fail"]
 _ORDER = {"pass": 0, "warn": 1, "fail": 2}
@@ -54,6 +54,53 @@ def _mk(
         value=value,
         threshold=threshold,
         message=msg_ok if ok else msg_bad,
+    )
+
+
+# Shoulder separation / trunk length, median over frames. Pure side view ≈ 0.1–0.3
+SAGITTAL_MAX_RATIO = 0.35
+OBLIQUE_MAX_RATIO = 0.50
+
+
+def _view_check(ratio: float, want_sagittal: bool, wanted: str) -> QualityCheck:
+    """three-band view check"""
+    if ratio < SAGITTAL_MAX_RATIO:
+        looks = "sagittal"
+    elif ratio < OBLIQUE_MAX_RATIO:
+        looks = "oblique"
+    else:
+        looks = "frontal"
+    detail = f"shoulder separation / trunk length = {ratio:.2f}"
+    if want_sagittal:
+        if looks == "sagittal":
+            status: Status = "pass"
+            msg = f"side view as the protocol expects ({detail})"
+        elif looks == "oblique":
+            status = "warn"
+            msg = (
+                f"camera is off the side axis ({detail}); timings are usable, joint angles are "
+                "less reliable. Aim the camera perpendicular to the person's side."
+            )
+        else:
+            status = "fail"
+            msg = (
+                f"protocol expects a {wanted} view but the recording looks frontal ({detail}). "
+                "Film from the person's side."
+            )
+    else:
+        ok = looks == "frontal"
+        status = "pass" if ok else "fail"
+        msg = (
+            f"frontal view as the protocol expects ({detail})"
+            if ok
+            else f"protocol expects a {wanted} view but the recording looks {looks} ({detail})."
+        )
+    return QualityCheck(
+        name="camera_view",
+        status=status,
+        value=ratio,
+        threshold=SAGITTAL_MAX_RATIO if want_sagittal else OBLIQUE_MAX_RATIO,
+        message=msg,
     )
 
 
@@ -112,7 +159,7 @@ def check_capture(cam: CameraCapture, protocol: Protocol) -> list[QualityCheck]:
 def check_track(
     track: PoseTrack, protocol: Protocol, *, person: int = 0, min_score: float = 0.5
 ) -> list[QualityCheck]:
-    """Checks on the raw (unfiltered) single-person track."""
+    """Checks on the single-person track."""
     lay = track.layout
     coords = track.coords[:, person]
     score = track.score[:, person]
@@ -172,8 +219,7 @@ def check_track(
             )
         )
 
-    # View check: in a sagittal view the shoulders overlap, so their horizontal separation is small
-    # relative to trunk length.
+    # View check: in side view the shoulders overlap
     if all(lay.has(n) for n in ("LShoulder", "RShoulder", "Neck", "Hip")) and present.any():
         ls, rs, nk, hp = (
             coords[:, lay.index(n)] for n in ("LShoulder", "RShoulder", "Neck", "Hip")
@@ -183,22 +229,9 @@ def check_track(
             trunk = np.linalg.norm(nk - hp, axis=1)
             ratio = float(np.nanmedian(sep / trunk))
         want_sagittal = protocol.capture.view in ("sagittal", "sagittal_left", "sagittal_right")
-        is_sagittal = ratio < 0.35
-        out.append(
-            _mk(
-                "camera_view",
-                is_sagittal == want_sagittal,
-                ratio,
-                0.35,
-                f"view consistent with protocol ({'sagittal' if is_sagittal else 'frontal'})",
-                f"protocol expects a {protocol.capture.view} view but the recording looks "
-                f"{'sagittal' if is_sagittal else 'frontal'} "
-                f"(shoulder separation / trunk length = {ratio:.2f}).",
-            )
-        )
+        out.append(_view_check(ratio, want_sagittal, protocol.capture.view))
 
-    # Left/right ordering instability of paired lower-limb keypoints (a symptom of side swaps).
-    # Not meaningful for gait, where the legs cross each other every step by design.
+    # Left/right ordering instability of lower-limb keypoints
     pairs = [("LHip", "RHip"), ("LKnee", "RKnee"), ("LAnkle", "RAnkle")]
     if protocol.protocol.family == "gait":
         pairs = []
@@ -229,9 +262,10 @@ def check_track(
 
 
 def check_multi_person(full_track: PoseTrack) -> list[QualityCheck]:
-    if full_track.n_persons <= 1:
+    real = ~full_track.spurious  # avoid stuff that's not people
+    if int(real.sum()) <= 1:
         return []
-    present = full_track.present()
+    present = full_track.present()[:, real]
     frac_multi = float((present.sum(axis=1) > 1).mean())
     return [
         _mk(
@@ -248,83 +282,27 @@ def check_multi_person(full_track: PoseTrack) -> list[QualityCheck]:
     ]
 
 
-def check_gait(
-    events: Any, track: PoseTrack, protocol: Protocol, *, min_cycles: int
-) -> list[QualityCheck]:
-    """Gait-specific checks on segmentation output and the raw single-person track."""
-    out: list[QualityCheck] = []
-    n = int(getattr(events, "n_cycles", 0))
-    out.append(
-        _mk(
-            "gait_cycles",
-            n >= min_cycles,
-            float(n),
-            float(min_cycles),
-            f"{n} steady gait cycles analysed",
-            f"only {n} steady gait cycles; the protocol needs at least {min_cycles}. Film a longer "
-            "walkway or more passes, and start walking before entering the frame.",
-        )
-    )
-    lay = track.layout
-    coords = track.coords[:, 0]
-    if lay.has("Hip") and track.image_size is not None:
-        hip_x = coords[:, lay.index("Hip"), 0]
-        with np.errstate(all="ignore"):
-            ext = np.nanmax(coords[..., 1], axis=1) - np.nanmin(coords[..., 1], axis=1)
-        body_h = float(np.nanmedian(ext)) if np.isfinite(ext).any() else 0.0
-        travel = float(np.nanmax(hip_x) - np.nanmin(hip_x)) if np.isfinite(hip_x).any() else 0.0
-        ratio = travel / body_h if body_h > 0 else 0.0
-        out.append(
-            _mk(
-                "walking_distance",
-                ratio >= 1.5,
-                ratio,
-                1.5,
-                f"subject crossed {ratio:.1f} body heights of frame",
-                f"subject moved only {ratio:.1f} body heights across the frame; the protocol "
-                "expects a walk across the field of view (not toward or away from the camera).",
-            )
-        )
-    for side, names in (("left", ("LHeel", "LBigToe")), ("right", ("RHeel", "RBigToe"))):
-        present = [n_ for n_ in names if lay.has(n_)]
-        if not present:
-            continue
-        sc = track.score[:, 0][:, lay.indices(*present)]
-        mean_sc = float(np.nanmean(sc)) if sc.size else 0.0
-        out.append(
-            _mk(
-                f"foot_confidence_{side}",
-                mean_sc >= 0.4,
-                mean_sc,
-                0.4,
-                f"{side} foot keypoints confidence {mean_sc:.2f}",
-                f"{side} foot keypoints are weak ({mean_sc:.2f}); heel-strike and toe-off timing "
-                "on that side is less reliable (typical of the far leg in a side view).",
-                severity="warn",
-            )
-        )
-    return out
-
-
 def check_camera_motion(video_path: Path | str) -> QualityCheck:
-    from ptvision.quality.camera_motion import estimate_camera_motion
+    from ptvision.quality.camera_motion import estimate_camera_motion, motion_threshold_px
 
     m = estimate_camera_motion(video_path)
+    thr = motion_threshold_px(float(m.get("long_side", 0.0)))
     if m.get("unreliable"):
         return QualityCheck(
             name="camera_motion",
             status="pass",
             value=None,
-            threshold=2.0,
+            threshold=thr,
             message="camera motion not assessable (too little image texture); assumed steady",
         )
     return _mk(
         "camera_motion",
-        m["median_px"] <= 2.0,
+        m["median_px"] <= thr,
         m["median_px"],
-        2.0,
-        "camera steady",
-        f"camera moves about {m['median_px']:.1f} px between sampled frames; use a tripod.",
+        thr,
+        f"camera steady ({m['median_px']:.1f} px between sampled frames)",
+        f"camera moves about {m['median_px']:.1f} px between sampled frames "
+        f"(limit {thr:.1f}); use a tripod.",
         severity="warn",
     )
 

@@ -1,11 +1,4 @@
-"""RTMPose Halpe-26 backend via rtmlib (YOLOX person detector + RTMPose top-down estimator).
-
-We drive rtmlib's detector and estimator ourselves instead of using `BodyWithFeet.__call__` or
-`PoseTracker` so that (a) weights come from our checksummed cache and land in provenance,
-(b) the detector runs every `det_frequency` frames with keypoint-derived boxes in between,
-and (c) frames with no detection produce no skeleton (rtmlib would otherwise estimate a pose on
-the whole image).
-"""
+"""RTMPose Halpe-26 backend via rtmlib (YOLOX person detector + RTMPose top-down estimator)"""
 
 from __future__ import annotations
 
@@ -15,11 +8,11 @@ from collections.abc import Iterable
 
 import numpy as np
 
-from ptvision.pose.base import PoseModelInfo, ProgressFn
+from ptvision.pose.base import PoseModelInfo, PreviewFn, ProgressFn
 from ptvision.pose.layout import HALPE26
-from ptvision.pose.models import ModelManager
+from ptvision.pose.models import DownloadProgress, ModelManager
 from ptvision.pose.track import PoseTrack
-from ptvision.pose.tracking import TrackerParams, assign_ids
+from ptvision.pose.tracking import TrackerParams, assign_ids, stitch_tracks
 
 
 def bboxes_from_keypoints(
@@ -54,6 +47,60 @@ def bboxes_from_keypoints(
     return np.asarray(boxes, dtype=np.float32).reshape(-1, 4)
 
 
+def _box_area(bx: np.ndarray) -> float:
+    return float((bx[2] - bx[0]) * (bx[3] - bx[1]))
+
+
+def dedupe_persons(
+    kpts: np.ndarray, scores: np.ndarray, *, iou_thr: float = 0.5, kpt_thr: float = 0.3
+) -> tuple[np.ndarray, np.ndarray]:
+    """Drop pose estimates that sit on top of another one (two detector boxes on one person).
+
+    Duplicates make the tracker hand the subject's id to the copy and start a new id for the
+    real track. Boxes are taken from confident keypoints; of two with IoU above `iou_thr` the
+    lower mean score goes. [REVIEW].
+    """
+    n = kpts.shape[0]
+    if n < 2:
+        return kpts, scores
+    boxes = np.full((n, 4), np.nan, np.float32)
+    for i in range(n):
+        good = scores[i] >= kpt_thr
+        if good.sum() >= 3:
+            pts = kpts[i][good]
+            boxes[i] = [*pts.min(axis=0), *pts.max(axis=0)]
+    keep = np.ones(n, dtype=bool)
+    good = scores >= kpt_thr
+    mean_good = np.where(
+        good.any(axis=1), (scores * good).sum(axis=1) / np.maximum(good.sum(axis=1), 1), 0.0
+    )
+    order = np.argsort(-mean_good)
+    for a_i, a in enumerate(order):
+        if not keep[a] or np.isnan(boxes[a]).any():
+            continue
+        for b in order[a_i + 1 :]:
+            if not keep[b] or np.isnan(boxes[b]).any():
+                continue
+            ix0, iy0 = max(boxes[a, 0], boxes[b, 0]), max(boxes[a, 1], boxes[b, 1])
+            ix1, iy1 = min(boxes[a, 2], boxes[b, 2]), min(boxes[a, 3], boxes[b, 3])
+            inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+            union = _box_area(boxes[a]) + _box_area(boxes[b]) - inter
+            if union > 0 and inter / union > iou_thr:
+                keep[b] = False
+    return kpts[keep], scores[keep]
+
+
+def _grow_boxes(boxes: np.ndarray, frac: float, image_size: tuple[int, int]) -> np.ndarray:
+    w, h = image_size
+    out = boxes.copy()
+    bw, bh = boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1]
+    out[:, 0] = np.clip(boxes[:, 0] - frac * bw, 0, w)
+    out[:, 1] = np.clip(boxes[:, 1] - frac * bh, 0, h)
+    out[:, 2] = np.clip(boxes[:, 2] + frac * bw, 0, w)
+    out[:, 3] = np.clip(boxes[:, 3] + frac * bh, 0, h)
+    return out
+
+
 class RtmlibBackend:
     def __init__(
         self,
@@ -65,7 +112,12 @@ class RtmlibBackend:
         models: ModelManager | None = None,
         tracker: TrackerParams | None = None,
         verify_checksums: bool = True,
+        download_progress: DownloadProgress | None = None,
+        carry_over_s: float = 1.0,
+        det_score_thr: float = 0.5,
     ):
+        self.carry_over_s = carry_over_s
+        self.det_score_thr = det_score_thr
         self.layout = HALPE26
         self.mode = mode
         self.device = device
@@ -74,7 +126,9 @@ class RtmlibBackend:
         self.tracker = tracker or TrackerParams()
 
         mm = models or ModelManager()
-        paths = mm.ensure_mode(mode, verify=verify_checksums, quiet=True)
+        paths = mm.ensure_mode(
+            mode, verify=verify_checksums, quiet=True, progress=download_progress
+        )
         self._paths = paths
 
         import rtmlib
@@ -96,6 +150,13 @@ class RtmlibBackend:
         if backend == "onnxruntime":
             import onnxruntime as ort
 
+            if device == "cpu":
+                self._tune_sessions()
+        # rtmlib's YOLOX default of 0.7 misses a person whose head or torso is out of frame;
+        # 0.5 keeps them (short false detections are filtered by spurious_slots afterwards)
+        det = getattr(self._model, "det_model", None)
+        if det is not None and hasattr(det, "score_thr"):
+            det.score_thr = self.det_score_thr
             providers = list(self._model.pose_model.session.get_providers())
             runtime = f"onnxruntime {ort.__version__}"
         elif backend == "opencv":
@@ -126,6 +187,39 @@ class RtmlibBackend:
             det_frequency=self.det_frequency,
             tracker=self.tracker.to_dict(),
         )
+
+    def _tune_sessions(self) -> None:
+        """[REVIEW]: rebuild rtmlib's ONNX sessions with explicit CPU options.
+
+        rtmlib creates sessions with defaults, so ORT's intra-op threads spin-wait between
+        inferences (700 % CPU observed while the main thread was busy elsewhere) and the CoreML
+        provider is registered even for CPU runs. Handoff evaluation 1 saw a `recursive_mutex lock
+        failed` abort at interpreter exit after such a run; disabling spinning and pinning the CPU
+        provider removes both behaviours. Sessions are also released explicitly by `close()`.
+        """
+        import onnxruntime as ort
+
+        so = ort.SessionOptions()
+        so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        so.add_session_config_entry("session.inter_op.allow_spinning", "0")
+        so.log_severity_level = 3
+        for tool, path in (
+            (self._model.det_model, self._paths.det.onnx_path),
+            (self._model.pose_model, self._paths.pose.onnx_path),
+        ):
+            tool.session = ort.InferenceSession(
+                str(path), sess_options=so, providers=["CPUExecutionProvider"]
+            )
+
+    def close(self) -> None:
+        """Release the model sessions (call after the last estimate; safe to call twice)."""
+        model = getattr(self, "_model", None)
+        if model is None:
+            return
+        for tool in (getattr(model, "det_model", None), getattr(model, "pose_model", None)):
+            if tool is not None and hasattr(tool, "session"):
+                tool.session = None
+        self._model = None
 
     def _warmup(self) -> None:
         """Run one detector + pose inference on a blank frame so provider failures surface early
@@ -164,17 +258,47 @@ class RtmlibBackend:
         image_size: tuple[int, int],
         n_frames: int | None = None,
         progress: ProgressFn | None = None,
+        preview: PreviewFn | None = None,
     ) -> PoseTrack:
         per_kpts: list[np.ndarray] = []
         per_scores: list[np.ndarray] = []
         bboxes = np.empty((0, 4), np.float32)
+        # [REVIEW](partial visibility):
+        # - when the detector finds nobody, keep estimating on the last boxes for up to
+        #   `carry_over_s` (a person with the head cut off is often missed by the detector while
+        #   the pose model still tracks the visible joints fine);
+        # - keypoints placed outside the frame get score 0 so nothing downstream treats a
+        #   hallucinated off-screen ankle as seen.
+        carry_frames = max(1, round(self.carry_over_s * fps))
+        last_boxes = np.empty((0, 4), np.float32)
+        unseen = 0
+        w, h = image_size
+        margin = 0.02 * max(w, h)
         for idx, img in frames:
             if idx % self.det_frequency == 0 or len(bboxes) == 0:
                 bboxes = self.detect(img)
+                if len(bboxes) == 0 and len(last_boxes) and unseen < carry_frames:
+                    bboxes = last_boxes
             kpts, scores = self.pose(img, bboxes)
+            if kpts.shape[0]:
+                off = (
+                    (kpts[..., 0] < -margin)
+                    | (kpts[..., 0] > w + margin)
+                    | (kpts[..., 1] < -margin)
+                    | (kpts[..., 1] > h + margin)
+                )
+                scores = np.where(off, 0.0, scores).astype(np.float32)
+                kpts, scores = dedupe_persons(kpts, scores)
             per_kpts.append(kpts)
             per_scores.append(scores)
             bboxes = bboxes_from_keypoints(kpts, scores, image_size)
+            if len(bboxes):
+                last_boxes = _grow_boxes(bboxes, 0.15, image_size)
+                unseen = 0
+            else:
+                unseen += 1
+            if preview is not None:
+                preview(idx, img, kpts, scores)
             if progress is not None:
                 progress(idx + 1, n_frames)
 
@@ -187,6 +311,8 @@ class RtmlibBackend:
             coords, score, ids = assign_ids(
                 per_kpts, per_scores, fps=fps, image_size=image_size, params=self.tracker
             )
+            coords, score = stitch_tracks(coords, score, fps=fps, image_size=image_size)
+            ids = np.arange(coords.shape[1], dtype=np.int16)
         return PoseTrack(
             layout=self.layout,
             fps=fps,

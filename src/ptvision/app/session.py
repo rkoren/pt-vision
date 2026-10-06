@@ -1,4 +1,4 @@
-"""Loads a trial (and one of its runs) into the in-memory model the viewer widgets read"""
+"""Loads a trial into the in-memory model the viewer widgets read"""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ import numpy as np
 
 from ptvision.clinical.metrics.base import Metric, NormComparison
 from ptvision.clinical.protocol import Protocol, load_protocol
-from ptvision.data.models import Capture, RunProvenance
-from ptvision.data.store import RunDir, TrialDir
-from ptvision.io.jsonio import read_json
+from ptvision.files import read_json
 from ptvision.kinematics.angles import AngleSeries, compute_angles, resolve_side
 from ptvision.kinematics.preprocess import preprocess
 from ptvision.pose.track import PoseTrack
 from ptvision.pose.tracking import select_primary_person
 from ptvision.quality.checks import QualityReport
+from ptvision.trials.models import Capture, RunProvenance
+from ptvision.trials.store import RunDir, TrialDir
 from ptvision.viz.status import BoneStatus, Mode, Rule
 
 PhaseKind = Literal["rise", "stand", "descent", "stance", "swing"]
@@ -129,6 +129,7 @@ class TrialSession:
     quality: QualityReport | None = None
     warnings: list[str] = field(default_factory=list)
     provenance: RunProvenance | None = None
+    smoothed: np.ndarray | None = None  # (T, K, 2) primary, gap-filled + low-passed (viewer)
 
     @property
     def edges(self) -> list[tuple[int, int]]:
@@ -149,6 +150,19 @@ class TrialSession:
     def default_mode(self) -> Mode:
         return "rules" if self.status.rules is not None else "confidence"
 
+    @property
+    def first_present_frame(self) -> int:
+        """determines when clip actually starts"""
+        if self.test_window is not None and 0 <= self.test_window[0] < self.n_frames:
+            return int(self.test_window[0])
+        sc = self.track.score[:, self.primary_slot]
+        confident = (sc >= 0.3).mean(axis=1)
+        whole = np.flatnonzero(confident >= 0.6)
+        if whole.size:
+            return int(whole[0])
+        seen = np.flatnonzero(confident > 0)
+        return int(seen[0]) if seen.size else 0
+
     def bone_colors(self, t: int, mode: Mode) -> tuple[np.ndarray, np.ndarray]:
         return self.status.colors(t, mode)
 
@@ -162,6 +176,14 @@ class TrialSession:
             if 0 <= t < len(v) and not np.isnan(v[t]):
                 out[name] = float(v[t])
         return out
+
+    def rep_at(self, t: int) -> tuple[int, int] | None:
+        """current repetition for frame t, or None"""
+        starts = sorted(m.frame for m in self.events if m.label == "seat-off" and m.rep is not None)
+        if not starts:
+            return None
+        done = sum(1 for f in starts if f <= t)
+        return (done, len(starts)) if done else None
 
     def default_angle_names(self) -> list[str]:
         wanted = self.protocol.report.angles if self.protocol else DEFAULT_ANGLES
@@ -206,13 +228,17 @@ class TrialSession:
         protocol = _protocol_from_provenance(prov)
         rules = protocol.rule_list() if protocol else []
 
+        # [REVIEW]: the same gap-filled, low-passed track the angles use is
+        # also what the viewer draws by default (raw keypoints jitter frame to frame and hidden
+        # joints flicker); the panel's "smooth skeleton" box switches back to raw.
+        pre = preprocess(single)
+        smoothed = np.asarray(pre.filtered.coords[:, 0], dtype=np.float32)
         angles_path = run.path / "angles.parquet" if run is not None else None
         if angles_path is not None and angles_path.exists():
             angles = AngleSeries.load(
                 angles_path, side_fallback=resolve_side(single, "near"), fps_fallback=cam.fps
             )
         else:
-            pre = preprocess(single)
             angles = compute_angles(pre.filtered, DEFAULT_ANGLES, side="near")
 
         status = BoneStatus.build(
@@ -255,6 +281,7 @@ class TrialSession:
             n_frames=n_frames,
             image_size=(cam.width, cam.height),
             track=track,
+            smoothed=smoothed,
             primary_slot=slot,
             primary_id=pid,
             angles=angles,

@@ -42,6 +42,8 @@ class StsParams:
     lean_velocity_deg_s: float = 10.0
     segment_signal_cutoff_hz: float = 3.0
     manual_start_s: float | None = None
+    # [REVIEW]: a test start/end this close to the clip boundary is flagged as truncated
+    edge_margin_s: float = 0.3
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> StsParams:
@@ -78,6 +80,7 @@ class StsEvents:
     params: StsParams
     warnings: list[str] = field(default_factory=list)
     n_in_window: int | None = None
+    truncated: bool = False  # test start or end within edge_margin_s of the clip boundary
 
     @property
     def n_reps(self) -> int:
@@ -98,6 +101,7 @@ class StsEvents:
             "total_time_s": self.total_time_s,
             "n_reps": self.n_reps,
             "n_in_window": self.n_in_window,
+            "truncated": self.truncated,
             "reps": [r.to_dict() for r in self.reps],
             "warnings": list(self.warnings),
             "params": self.params.to_dict(),
@@ -244,6 +248,21 @@ def segment_sts_signal(
         else:
             end = last.stand_reached
     ev.test_start, ev.test_end = int(start), int(end)
+    # [REVIEW]: both session-1 clips stopped recording on the fifth stand, so "stand reached"
+    # was really "recording stopped" and the time came out 0.1–0.5 s short with a confident error.
+    margin = round(p.edge_margin_s * fps)
+    if ev.test_start < margin:
+        ev.truncated = True
+        ev.warnings.append(
+            f"test start is within {p.edge_margin_s:.1f} s of the clip start; the recording may "
+            "have begun mid-movement, start recording earlier"
+        )
+    if ev.test_end > t - 1 - margin:
+        ev.truncated = True
+        ev.warnings.append(
+            f"test end is within {p.edge_margin_s:.1f} s of the clip end; the last stand may be "
+            "cut off and the total time short, keep recording 2 s after the final stand"
+        )
     return ev
 
 

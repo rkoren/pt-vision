@@ -1,12 +1,8 @@
 import numpy as np
 import pytest
 
-from ptvision.clinical.segmenters.gait_zeni import GaitParams
-from ptvision.datasets.c3d import C3DEvent, C3DTrial
-from ptvision.datasets.eval_gait import score_trial
-from ptvision.datasets.mocap_projection import classify_event, project_trial
+from ptvision.datasets.mocap_projection import project_trial
 from ptvision.datasets.registry import load_manifest
-from tests.synthetic import GaitTimeline, synthetic_gait_track
 
 
 def test_manifest_loads_with_licenses() -> None:
@@ -17,85 +13,6 @@ def test_manifest_loads_with_licenses() -> None:
         for f in s.files:
             assert f.url.startswith("https://")
     assert specs["comfi-video"].dir_name == "comfi"
-
-
-def test_classify_events() -> None:
-    assert classify_event(C3DEvent("LHS", "", 1.0)) == ("left", "hs")
-    assert classify_event(C3DEvent("RTO", "", 1.0)) == ("right", "to")
-    assert classify_event(C3DEvent("Foot Strike", "Left", 1.0)) == ("left", "hs")
-    assert classify_event(C3DEvent("Foot Off", "Right", 1.0)) == ("right", "to")
-    assert classify_event(C3DEvent("Foot Strike1", "Right", 1.0)) == ("right", "hs")
-    assert classify_event(C3DEvent("LON", "", 1.0)) is None
-    assert classify_event(C3DEvent("General", "General", 1.0)) is None
-
-
-def _trial_from_synthetic(
-    vertical_axis: int = 2, forward_axis: int = 0, sign: int = 1, rate: float = 100.0
-):  # type: ignore[no-untyped-def]
-    """Lift the synthetic 2D gait (px, y down) to a 3D lab frame in metres with labelled events."""
-    from pathlib import Path
-
-    tl = GaitTimeline(fps=rate, duration_s=6.0)
-    track, tl = synthetic_gait_track(tl)
-    px_per_m = 260.0
-    names = {
-        "L.Heel": "LHeel",
-        "R.Heel": "RHeel",
-        "L.MT1": "LBigToe",
-        "R.MT1": "RBigToe",
-        "L.Ankle": "LAnkle",
-        "R.Ankle": "RAnkle",
-        "L.Knee": "LKnee",
-        "R.Knee": "RKnee",
-        "L.GTR": "LHip",
-        "R.GTR": "RHip",
-        "L.ASIS": "LHip",
-        "R.ASIS": "RHip",
-        "L.PSIS": "LHip",
-        "R.PSIS": "RHip",
-    }
-    T = track.n_frames
-    labels = list(names)
-    pts = np.full((T, len(labels), 3), np.nan)
-    floor_y = 900.0
-    for i, (lbl, kp) in enumerate(names.items()):
-        c = track.keypoint(kp).astype(np.float64)
-        fwd = sign * c[:, 0] / px_per_m
-        up = (floor_y - c[:, 1]) / px_per_m
-        lat = -0.1 if lbl.startswith("L") else 0.1
-        if lbl.endswith("PSIS"):
-            fwd = fwd - 0.12
-        pts[:, i, vertical_axis] = up
-        pts[:, i, forward_axis] = fwd
-        pts[:, i, 3 - vertical_axis - forward_axis] = lat
-    events = []
-    for side in ("left", "right"):
-        S = side[0].upper()
-        events += [C3DEvent(f"{S}HS", "", f / rate) for f in tl.hs[side]]
-        events += [C3DEvent(f"{S}TO", "", f / rate) for f in tl.to[side]]
-    events.sort(key=lambda e: e.time_s)
-    return C3DTrial(Path("synthetic.c3d"), rate, labels, pts, events, 0, "m"), tl
-
-
-@pytest.mark.parametrize("vertical,forward,sign", [(2, 0, 1), (1, 0, -1), (2, 1, 1)])
-def test_lab_frame_and_projection_recover_direction(vertical: int, forward: int, sign: int) -> None:
-    trial, tl = _trial_from_synthetic(vertical, forward, sign)
-    pt = project_trial(trial, fps=30.0)
-    assert pt.lab.vertical == vertical and pt.lab.forward == forward and pt.lab.forward_sign == sign
-    hip = pt.track.keypoint("Hip")[:, 0]
-    assert np.nanmean(np.diff(hip)) > 0  # walks toward image-right after projection
-    assert pt.track.n_frames == pytest.approx(tl.duration_s * 30, abs=2)
-    assert len(pt.events) > 10
-    assert np.isnan(pt.track.keypoint("Neck")).all()  # lower-body-only set stays NaN
-
-
-def test_score_trial_on_synthetic_mocap() -> None:
-    trial, _tl = _trial_from_synthetic()
-    pt = project_trial(trial, fps=30.0)
-    s = score_trial(pt, GaitParams(min_cycles=1, drop_edge_cycles=0, edge_margin_frac=0.0))
-    assert s.n_truth >= 20 and s.missed <= 2
-    e = np.abs(np.asarray(s.errors_frames))
-    assert (e <= 2).mean() >= 0.9, s.row()
 
 
 def test_uiprmd_vicon_loader_and_sts(tmp_path) -> None:
@@ -152,18 +69,51 @@ def test_uiprmd_vicon_loader_and_sts(tmp_path) -> None:
     assert abs(ev.reps[0].seat_off - round(tl.seat_off[0] * 30 / 100)) <= 2
 
 
-def test_side_swap_detection() -> None:
-    from ptvision.datasets.eval_gait import score_trial
+def test_pull_keeps_verified_file_without_provenance_and_saves_per_file(
+    tmp_path, monkeypatch
+) -> None:
+    # [REVIEW] an interrupted pull must not download finished files again
+    import hashlib
 
-    trial, _tl = _trial_from_synthetic()
-    swapped = [
-        C3DEvent(("R" if e.label[0] == "L" else "L") + e.label[1:], "", e.time_s)
-        for e in trial.events
-    ]
-    trial_sw = C3DTrial(trial.path, trial.rate, trial.labels, trial.points, swapped, 0, "m")
-    s = score_trial(
-        project_trial(trial_sw, fps=30.0),
-        GaitParams(min_cycles=1, drop_edge_cycles=0, edge_margin_frac=0.0, bout_speed_frac=0.0),
+    from ptvision.datasets import registry as R
+
+    monkeypatch.setenv("PTV_DATASETS_DIR", str(tmp_path))
+    good = b"already here"
+    files = (
+        R.DatasetFile(
+            url="http://x/a.bin", name="a.bin", size=len(good), md5=hashlib.md5(good).hexdigest()
+        ),
+        R.DatasetFile(
+            url="http://x/b.bin", name="b.bin", size=3, md5=hashlib.md5(b"new").hexdigest()
+        ),
     )
-    assert s.side_swapped is True
-    assert s.matched >= 0.8 * s.n_truth
+    spec = R.DatasetSpec(
+        name="t",
+        title="t",
+        citation="c",
+        source="s",
+        license="CC0",
+        license_url="https://example.org",
+        kind="mocap",
+        notes="",
+        files=files,
+    )
+    dirs = R.DatasetDirs.for_spec(spec)
+    dirs.raw.mkdir(parents=True)
+    (dirs.raw / "a.bin").write_bytes(good)  # on disk, but no PROVENANCE.json yet
+    calls: list[str] = []
+
+    def fake_download(url, dst, *, expected, label, progress):  # type: ignore[no-untyped-def]
+        calls.append(label)
+        if label == "b.bin" and len(calls) == 1:
+            raise R.DownloadError("network down")
+        dst.write_bytes(b"new")
+
+    monkeypatch.setattr(R, "_download", fake_download)
+
+    with pytest.raises(R.DownloadError):
+        R.pull(spec)
+    assert calls == ["b.bin"], "a.bin must be kept, not downloaded"
+    assert dirs.provenance.exists(), "progress saved before the failure"
+    res = R.pull(spec)
+    assert res.skipped == ["a.bin"] and res.downloaded == ["b.bin"]

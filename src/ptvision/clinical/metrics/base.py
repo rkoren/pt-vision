@@ -7,10 +7,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ptvision.data.models import Capture
 from ptvision.kinematics.angles import AngleSeries
 from ptvision.kinematics.scale import ScaleModel
 from ptvision.pose.track import PoseTrack
+from ptvision.trials.models import Capture
 
 ErrorKind = Literal["resolution", "mdd", "rmse", "mae", "ci95", "sd", "unknown"]
 
