@@ -42,7 +42,8 @@ from ptvision.datasets.sts_force import (
 STS_TASKS: tuple[str, ...] = ("STS1", "STSweakLegs1")
 CAMERAS: tuple[int, ...] = (0, 1, 2, 3, 4)
 
-# nominal azimuth (just means horizontal angle) of each camera from the subject's facing direction (0 = frontal, ±90 = side)
+# nominal azimuth (just means horizontal angle) of each camera
+# based on subject's facing direction (0 = frontal, ±90 = side)
 CAMERA_VIEW_DEG: dict[int, float] = {0: -70.0, 1: -45.0, 2: 0.0, 3: 45.0, 4: 70.0}
 SUBJECT_RE = re.compile(r"^subject(\d+)$")
 
