@@ -5,5 +5,4 @@ https://github.com/davidpagnon/Sports2D (BSD 3-Clause, David Pagnon), rescaled t
 with `ffmpeg -ss 1 -t 2 -vf scale=-2:480 -c:v libx264 -crf 28`. A person exercising, filmed
 side-on. Used by the `model` integration test and the video-probe tests.
 
-Pose Parquet fixtures for the clinical tests (Slice 1) are generated with `scripts/make_pose_fixture.py`
-from real recordings and committed alongside a manually annotated event CSV. Never commit patient video.
+Everything else the tests need is generated (`tests/synthetic.py`). Never commit patient video.

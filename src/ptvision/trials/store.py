@@ -1,13 +1,9 @@
-"""Filesystem layout of the data store.
+"""Filesystem layout of a trial directory (`ptv_out/<clip>/` by default).
 
-    <root>/patients/<patient_id>/patient.json
-    <root>/patients/<patient_id>/episodes.json
-    <root>/patients/<patient_id>/visits/<visit_id>/visit.json
-    <root>/patients/<patient_id>/visits/<visit_id>/trials/<trial_id>/
-        capture.json  source/<original>  video/cam0.mp4  pose/cam0.parquet
-        runs/<run_id>/{provenance.json, overlay.mp4, ...}  latest.json
+    <trial>/capture.json  source/<original>  video/cam0.mp4  pose/cam0.parquet
+    <trial>/runs/<run_id>/{provenance.json, overlay.mp4, ...}  latest.json
 
-Anonymous trials use the same layout under arbitrary output directory
+`capture.json` is written once per trial; every processing run gets its own `runs/<run_id>/`.
 """
 
 from __future__ import annotations
@@ -22,7 +18,7 @@ from pathlib import Path
 
 from ptvision._version import __version__
 from ptvision.files import read_json, write_json
-from ptvision.trials.models import Capture, Episode, Patient, RunProvenance, Visit
+from ptvision.trials.models import Capture, RunProvenance
 
 # ---- ids ---------------------------------------------------------------------------------
 
@@ -148,104 +144,8 @@ def base_provenance(run_id: str) -> RunProvenance:
     )
 
 
-class DataStore:
-    def __init__(self, root: Path):
-        self.root = Path(root)
-
-    # ---- anonymous trials ----------------------------------------------------------------
-    @staticmethod
-    def anonymous_trial(out_dir: Path, trial_id: str | None = None) -> TrialDir:
-        """A trial directory outside the patient tree (e.g. ./ptv_out/<clip>/)."""
-        trial = TrialDir(Path(out_dir))
-        trial.path.mkdir(parents=True, exist_ok=True)
-        return trial
-
-    # ---- patients ---------------------------------------------------------------------
-    def patients_dir(self) -> Path:
-        return self.root / "patients"
-
-    def patient_dir(self, patient_id: str) -> Path:
-        return self.patients_dir() / patient_id
-
-    def list_patients(self) -> list[Patient]:
-        d = self.patients_dir()
-        if not d.exists():
-            return []
-        out = []
-        for p in sorted(d.iterdir()):
-            f = p / "patient.json"
-            if f.exists():
-                out.append(Patient.model_validate(read_json(f)))
-        return out
-
-    def get_patient(self, patient_id: str) -> Patient:
-        f = self.patient_dir(patient_id) / "patient.json"
-        if not f.exists():
-            raise KeyError(f"patient {patient_id!r} not found in {self.root}")
-        return Patient.model_validate(read_json(f))
-
-    def create_patient(self, patient: Patient) -> Path:
-        d = self.patient_dir(patient.patient_id)
-        if d.exists():
-            raise FileExistsError(d)
-        d.mkdir(parents=True)
-        write_json(d / "episodes.json", [])
-        return write_json(d / "patient.json", patient)
-
-    def episodes(self, patient_id: str) -> list[Episode]:
-        f = self.patient_dir(patient_id) / "episodes.json"
-        return [Episode.model_validate(e) for e in read_json(f)] if f.exists() else []
-
-    def add_episode(self, patient_id: str, episode: Episode) -> None:
-        eps = self.episodes(patient_id)
-        if any(e.episode_id == episode.episode_id for e in eps):
-            raise FileExistsError(episode.episode_id)
-        eps.append(episode)
-        write_json(self.patient_dir(patient_id) / "episodes.json", eps)
-
-    # ---- visits -----------------------------------------------------------------------
-    def visit_dir(self, patient_id: str, visit_id: str) -> Path:
-        return self.patient_dir(patient_id) / "visits" / visit_id
-
-    def list_visits(self, patient_id: str) -> list[Visit]:
-        d = self.patient_dir(patient_id) / "visits"
-        if not d.exists():
-            return []
-        return [
-            Visit.model_validate(read_json(p / "visit.json"))
-            for p in sorted(d.iterdir())
-            if (p / "visit.json").exists()
-        ]
-
-    def get_visit(self, patient_id: str, visit_id: str) -> Visit:
-        f = self.visit_dir(patient_id, visit_id) / "visit.json"
-        if not f.exists():
-            raise KeyError(f"visit {visit_id!r} not found for patient {patient_id!r}")
-        return Visit.model_validate(read_json(f))
-
-    def create_visit(self, visit: Visit) -> Path:
-        self.get_patient(visit.patient_id)
-        d = self.visit_dir(visit.patient_id, visit.visit_id)
-        if d.exists():
-            raise FileExistsError(d)
-        d.mkdir(parents=True)
-        return write_json(d / "visit.json", visit)
-
-    # ---- trials -----------------------------------------------------------------------
-    def list_trials(self, patient_id: str, visit_id: str) -> list[TrialDir]:
-        d = self.visit_dir(patient_id, visit_id) / "trials"
-        if not d.exists():
-            return []
-        return [TrialDir(p) for p in sorted(d.iterdir()) if p.is_dir()]
-
-    def new_trial(self, patient_id: str, visit_id: str) -> TrialDir:
-        self.get_visit(patient_id, visit_id)
-        trial = TrialDir(self.visit_dir(patient_id, visit_id) / "trials" / new_id("T"))
-        trial.path.mkdir(parents=True, exist_ok=False)
-        return trial
-
-    def trial(self, patient_id: str, visit_id: str, trial_id: str) -> TrialDir:
-        t = TrialDir(self.visit_dir(patient_id, visit_id) / "trials" / trial_id)
-        if not t.path.exists():
-            raise KeyError(f"trial {trial_id!r} not found")
-        return t
+def anonymous_trial(out_dir: Path) -> TrialDir:
+    """A trial directory at `out_dir`, created if needed."""
+    trial = TrialDir(Path(out_dir))
+    trial.path.mkdir(parents=True, exist_ok=True)
+    return trial

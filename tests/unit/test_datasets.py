@@ -7,12 +7,12 @@ from ptvision.datasets.registry import load_manifest
 
 def test_manifest_loads_with_licenses() -> None:
     specs = load_manifest()
-    assert {"uiprmd", "comfi", "comfi-video"} <= set(specs)
+    assert {"uiprmd", "opencap"} <= set(specs)
     for s in specs.values():
-        assert s.license and s.license_url.startswith("https://") and s.files
+        assert s.license and s.license_url.startswith("https://")
+        assert s.files or s.manual
         for f in s.files:
             assert f.url.startswith("https://")
-    assert specs["comfi-video"].dir_name == "comfi"
 
 
 def test_uiprmd_vicon_loader_and_sts(tmp_path) -> None:

@@ -50,9 +50,10 @@ class PreprocessSpec(BaseModel):
     segment_signal_cutoff_hz: float = 3.0
 
 
-class ScaleSpec(BaseModel):
-    method: Literal["none", "subject_height"] = "none"
-    floor_angle: Literal["auto"] | float = "auto"
+class KinematicsSpec(BaseModel):
+    # How the camera's angle off the side view is estimated and undone before angles are
+    # computed (see ptvision.kinematics.view). "none" leaves the keypoints as filmed.
+    view_correction: Literal["thigh_length", "shoulders", "none"] = "none"
 
 
 class SegmenterSpec(BaseModel):
@@ -126,7 +127,7 @@ class Protocol(BaseModel):
     capture: CaptureSpec = Field(default_factory=CaptureSpec)
     pose: PoseSpec = Field(default_factory=PoseSpec)
     preprocess: PreprocessSpec = Field(default_factory=PreprocessSpec)
-    scale: ScaleSpec = Field(default_factory=ScaleSpec)
+    kinematics: KinematicsSpec = Field(default_factory=KinematicsSpec)
     segmenter: SegmenterSpec
     metrics: list[MetricSpec]
     rules: list[RuleSpec] = Field(default_factory=list)

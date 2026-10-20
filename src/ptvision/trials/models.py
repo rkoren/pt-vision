@@ -49,9 +49,6 @@ class CameraCapture(BaseModel):
 class Capture(BaseModel):
     schema_version: int = SCHEMA_VERSION
     trial_id: str
-    patient_id: str | None = None
-    visit_id: str | None = None
-    episode_id: str | None = None
     protocol_id: str | None = None
     protocol_version: str | None = None
     recorded_at: str | None = None
@@ -79,29 +76,3 @@ class RunProvenance(BaseModel):
     pose_parquet_sha256: str | None = None
     pose_reused: bool = False  # keypoints loaded from a previous run with matching model
     timing_s: dict[str, float] = Field(default_factory=dict)
-
-
-class Patient(BaseModel):
-    schema_version: int = SCHEMA_VERSION
-    patient_id: str
-    label: str  # don't use real names
-    created_at: str
-    subject: Subject = Field(default_factory=Subject)
-    notes: str | None = None
-
-
-class Episode(BaseModel):
-    episode_id: str
-    label: str
-    started: str | None = None
-    ended: str | None = None
-    notes: str | None = None
-
-
-class Visit(BaseModel):
-    schema_version: int = SCHEMA_VERSION
-    visit_id: str
-    patient_id: str
-    date: str
-    episode_id: str | None = None
-    notes: str | None = None

@@ -7,7 +7,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 from rich.table import Table
@@ -15,9 +15,6 @@ from rich.table import Table
 from ptvision._version import __version__
 from ptvision.cli.common import console, err, progress_bar, subject_from_flags
 from ptvision.config import settings
-
-if TYPE_CHECKING:
-    pass
 
 app = typer.Typer(
     name="ptv",
@@ -32,12 +29,8 @@ app.add_typer(models_app, name="models")
 def _register_subcommands() -> None:
     """Sub-apps that live in their own modules (imported here to avoid import cycles)"""
     from ptvision.cli.datasets import datasets_app
-    from ptvision.cli.records import patient_app, report, visit_app
 
     app.add_typer(datasets_app, name="datasets")
-    app.add_typer(patient_app, name="patient")
-    app.add_typer(visit_app, name="visit")
-    app.command("report")(report)
 
 
 def _finish_after_inference(code: int = 0) -> None:
@@ -288,8 +281,6 @@ def analyze(
     out: Annotated[
         Path | None, typer.Option("--out", "-o", help="Output trial directory for anonymous runs.")
     ] = None,
-    patient: Annotated[str | None, typer.Option(help="Patient id in the data store.")] = None,
-    visit: Annotated[str | None, typer.Option(help="Visit id in the data store.")] = None,
     person: Annotated[
         int | None, typer.Option(help="Track id of the subject (default: automatic).")
     ] = None,
@@ -328,14 +319,9 @@ def analyze(
     from ptvision.video import require_ffmpeg
 
     require_ffmpeg()
-    if (patient is None) != (visit is None):
-        err.print("[red]--patient and --visit must be given together[/]")
-        raise typer.Exit(2)
     opts = AnalyzeOptions(
         protocol=protocol,
         out_dir=out,
-        patient_id=patient,
-        visit_id=visit,
         person=person,
         mode=mode,
         device=device,
@@ -437,8 +423,31 @@ def protocols_show(
     console.print(t)
 
 
+@app.command()
+def report(
+    trial_dir: Annotated[
+        Path, typer.Argument(exists=True, file_okay=False, help="Trial directory.")
+    ],
+    run: Annotated[str | None, typer.Option(help="Run id (default latest).")] = None,
+) -> None:
+    """Re-render report.html from an existing run's report.json."""
+    from ptvision.files import read_json
+    from ptvision.report.bundle import ReportBundle, render_html
+    from ptvision.trials.store import RunDir, TrialDir
+
+    trial = TrialDir(trial_dir)
+    rd = RunDir(trial.runs_dir / run) if run else trial.latest_run()
+    if rd is None or not (rd.path / "report.json").exists():
+        err.print("[red]no report.json found for that run[/]")
+        raise typer.Exit(1)
+    bundle = ReportBundle.model_validate(read_json(rd.path / "report.json"))
+    html = rd.path / "report.html"
+    html.write_text(render_html(bundle, bundle.template), encoding="utf-8")
+    console.print(f"re-rendered {html}")
+
+
 # ---------------------------------------------------------------------------------------------
-# Data store: patients, visits, trials
+# Desktop app
 # ---------------------------------------------------------------------------------------------
 def _require_app() -> Callable[..., int]:
     """Import the desktop app and check ffmpeg, with one clear message per missing piece."""

@@ -1,5 +1,4 @@
-"""The two pre-viewer pages of the window: the drop page (pick a clip, protocol and subject) and
-the progress page (stage, bar, live skeleton preview while the pipeline runs)."""
+"""The pre-viewer pages (drop page + progress page)"""
 
 from __future__ import annotations
 
@@ -62,7 +61,7 @@ class DropPage(QWidget):
         lay.addLayout(row)
         sub = QHBoxLayout()
         sub.setSpacing(6)
-        sub.addStretch(1)  # stretches on both ends keep fixed-width fields clustered
+        sub.addStretch(1)
         sub.addWidget(QLabel("Subject:"))
 
         # input fields

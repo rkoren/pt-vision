@@ -27,6 +27,13 @@ filter_order = 4
 filter_cutoff_hz = 6.0
 segment_signal_cutoff_hz = 3.0
 
+[kinematics]
+# A phone a few tens of degrees off the side view foreshortens the thigh and trunk. The shoulder
+# separation over the trunk length (the camera-view check's measure) says how far off, and the
+# keypoints are stretched back before the angles are computed (ptvision.kinematics.view).
+# Timing does not use it. "thigh_length" is the alternative estimator, "none" switches it off.
+view_correction = "shoulders"
+
 [segmenter]
 name = "sts_velocity_threshold"
 version = "0.1.0"

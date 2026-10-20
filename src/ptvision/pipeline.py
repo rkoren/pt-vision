@@ -20,7 +20,14 @@ from ptvision.pose.identity import select_primary_person, spurious_slots
 from ptvision.pose.overlay import render_overlay
 from ptvision.pose.track import PoseTrack
 from ptvision.trials.models import CameraCapture, Capture, RunProvenance, Subject, View
-from ptvision.trials.store import DataStore, RunDir, TrialDir, base_provenance, new_id, now_iso
+from ptvision.trials.store import (
+    RunDir,
+    TrialDir,
+    anonymous_trial,
+    base_provenance,
+    new_id,
+    now_iso,
+)
 from ptvision.video import iter_frames, normalize, probe
 from ptvision.viz import status as vs
 
@@ -44,9 +51,6 @@ class IngestOptions:
     protocol_id: str | None = None
     protocol_version: str | None = None
     notes: str | None = None
-    patient_id: str | None = None
-    visit_id: str | None = None
-    episode_id: str | None = None
 
 
 def ingest(
@@ -97,9 +101,6 @@ def ingest(
     )
     capture = Capture(
         trial_id=trial.trial_id or new_id("T"),
-        patient_id=opts.patient_id,
-        visit_id=opts.visit_id,
-        episode_id=opts.episode_id,
         protocol_id=opts.protocol_id,
         protocol_version=opts.protocol_version,
         recorded_at=src_info.creation_time,
@@ -269,8 +270,6 @@ def run_pose(
 class AnalyzeOptions:
     protocol: str = "sts_5x"
     out_dir: Path | None = None
-    patient_id: str | None = None
-    visit_id: str | None = None
     person: int | None = None
     mode: str | None = None
     device: str | None = None
@@ -298,18 +297,15 @@ class AnalyzeResult:
     warnings: list[str]
 
 
-def _resolve_trial(source: Path, opts: AnalyzeOptions, store: DataStore | None) -> TrialDir:
+def _resolve_trial(source: Path, opts: AnalyzeOptions) -> TrialDir:
     if source.is_dir():
         trial = TrialDir(source)
         if not trial.has_capture():
             raise FileNotFoundError(f"{source} is a directory without capture.json")
         return trial
-    if opts.patient_id and opts.visit_id:
-        store = store or DataStore(settings().data_dir)
-        return store.new_trial(opts.patient_id, opts.visit_id)
     if opts.out_dir is None:
-        return DataStore.anonymous_trial(default_trial_dir(source))
-    trial = DataStore.anonymous_trial(opts.out_dir)
+        return anonymous_trial(default_trial_dir(source))
+    trial = anonymous_trial(opts.out_dir)
     if holds_other_video(trial, source):
         raise TrialMismatchError(
             f"{opts.out_dir} already holds a different video; choose another output directory"
@@ -340,23 +336,15 @@ def default_trial_dir(source: Path) -> Path:
     return candidate
 
 
-def _prepare_trial(
-    source: Path, opts: AnalyzeOptions, store: DataStore | None, **ingest_extra: Any
-) -> TrialDir:
+def _prepare_trial(source: Path, opts: AnalyzeOptions, **ingest_extra: Any) -> TrialDir:
     """Resolve the trial, ingest the video once, and keep the capture's subject in sync with the
     options (the CLI flags or the app's drop-page form). Shared by `pose_only` and `analyze`."""
-    trial = _resolve_trial(source, opts, store)
+    trial = _resolve_trial(source, opts)
     if not trial.has_capture():
         ingest(
             source,
             trial,
-            IngestOptions(
-                max_height=opts.max_height,
-                subject=opts.subject,
-                patient_id=opts.patient_id,
-                visit_id=opts.visit_id,
-                **ingest_extra,
-            ),
+            IngestOptions(max_height=opts.max_height, subject=opts.subject, **ingest_extra),
         )
     if opts.subject is not None:
         capture = trial.read_capture()
@@ -435,7 +423,6 @@ def pose_only(
     source: Path,
     opts: AnalyzeOptions | None = None,
     *,
-    store: DataStore | None = None,
     backend: PoseBackend | None = None,
     progress: ProgressFn | None = None,
     on_stage: StageHook | None = None,
@@ -447,7 +434,7 @@ def pose_only(
     source = Path(source)
     if on_stage:
         on_stage("ingest")
-    trial = _prepare_trial(source, opts, store)
+    trial = _prepare_trial(source, opts)
     with _backend_for(opts, backend, None, None, progress=progress, on_stage=on_stage) as be:
         return run_pose(
             trial,
@@ -464,7 +451,6 @@ def analyze(
     source: Path,
     opts: AnalyzeOptions | None = None,
     *,
-    store: DataStore | None = None,
     backend: PoseBackend | None = None,
     progress: ProgressFn | None = None,
     on_stage: StageHook | None = None,
@@ -477,9 +463,10 @@ def analyze(
     from ptvision.clinical.metrics.base import Metric, MetricContext, NormComparison
     from ptvision.clinical.norms import compare, load_norms
     from ptvision.clinical.protocol import load_protocol
-    from ptvision.kinematics.angles import ANGLE_DEFS, compute_angles
+    from ptvision.kinematics.angles import ANGLE_DEFS, compute_angles, resolve_side
     from ptvision.kinematics.export import write_mot, write_trc
     from ptvision.kinematics.preprocess import PreprocessConfig, preprocess
+    from ptvision.kinematics.view import estimate_view, rectify_sagittal
     from ptvision.pose.overlay import thumbnail
     from ptvision.quality import checks as Q
     from ptvision.report.bundle import Figure, ReportBundle, build_report
@@ -502,7 +489,6 @@ def analyze(
     trial = _prepare_trial(
         source,
         opts,
-        store,
         view=protocol.capture.view,
         protocol_id=protocol.id,
         protocol_version=protocol.version,
@@ -588,8 +574,16 @@ def analyze(
         dict.fromkeys([*protocol.report.angles, "trunk_lean", "knee_flexion", "hip_flexion"])
     )
     angle_names = [a for a in angle_names if a in ANGLE_DEFS]
-    angles = compute_angles(pre.filtered, angle_names, side="near")
-    angles_raw = compute_angles(pre.raw, angle_names, side=angles.side)
+    # camera off the side axis: undo the horizontal foreshortening before measuring angles
+    side = resolve_side(pre.filtered, "near")
+    view = estimate_view(pre.filtered, protocol.kinematics.view_correction, side)
+    prov.preprocess["view_correction"] = view.to_dict()
+    filtered_for_angles = (
+        rectify_sagittal(pre.filtered, view.cos_theta) if view.applied else pre.filtered
+    )
+    raw_for_angles = rectify_sagittal(pre.raw, view.cos_theta) if view.applied else pre.raw
+    angles = compute_angles(filtered_for_angles, angle_names, side=side)
+    angles_raw = compute_angles(raw_for_angles, angle_names, side=side)
 
     # 5. segment
     stage("segmenting")
@@ -781,10 +775,17 @@ def analyze(
         ),
         (
             f"Angles computed on the {angles.side} side (higher keypoint confidence). Tier 1 = "
-            "timing/count (validated ICC > 0.9 vs clinicians); tier 2 = sagittal angles (typical "
-            "RMSE 4–6°); ankle and frontal-plane measures are not reported."
+            "timing/count (validated ICC > 0.9 vs clinicians); tier 2 = sagittal angles (knee "
+            "about 8° RMSE against lab motion capture from a camera 20° off the side); ankle "
+            "and frontal-plane measures are not reported."
         ),
     ]
+    if view.applied:
+        methods.append(
+            f"View correction ({view.method}): the camera was estimated {view.theta_deg:.0f}° off "
+            f"the side view; keypoints were stretched horizontally about the pelvis by "
+            f"1/{view.cos_theta:.2f} before the angles were computed. Timing is unaffected."
+        )
     bundle = ReportBundle(
         title=protocol.protocol.name,
         protocol={

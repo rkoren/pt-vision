@@ -1,6 +1,6 @@
 """Process-wide settings
 
-PTV_DATA_DIR       root of the patient/visit/trial store (default ~/ptvision-data)
+PTV_DATA_DIR       root for downloaded data (default ~/ptvision-data)
 PTV_MODEL_DIR      where ONNX weights are cached (default <user cache>/ptvision/models)
 PTV_MODE           rtmlib mode: lightweight | balanced | performance (default balanced)
 PTV_DEVICE         cpu | mps | cuda | cuda:N (default cpu; `mps` means the ONNX CoreML EP)

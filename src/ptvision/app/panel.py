@@ -202,6 +202,13 @@ class SidePanel(QWidget):
             bad = [c for c in q.checks if c.status != "pass"]
             lines = [f"<b style='color:{color}'>capture quality: {q.status.upper()}</b>"]
             lines += [f"• <b>{c.name}</b> ({c.status}): {c.message}" for c in bad]
+            prov = session.provenance
+            view = prov.preprocess.get("view_correction") if prov is not None else None
+            if isinstance(view, dict) and view.get("applied"):
+                lines.append(
+                    f"• <b>view correction</b>: camera about {view.get('theta_deg')}° off the "
+                    f"side ({view.get('method')}); angles corrected, timing unchanged"
+                )
             self.quality.setText("<br>".join(lines))
         else:
             self.quality.setText(

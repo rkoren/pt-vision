@@ -46,9 +46,6 @@ class Player(QObject):
             self._base_frame = self._frame
             self._clock.restart()
 
-    def seek_time(self, seconds: float) -> None:
-        self.seek(round(seconds * self.fps))
-
     def step(self, delta: int) -> None:
         self.pause()
         self._set_frame(self._frame + delta)

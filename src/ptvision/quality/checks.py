@@ -233,8 +233,6 @@ def check_track(
 
     # Left/right ordering instability of lower-limb keypoints
     pairs = [("LHip", "RHip"), ("LKnee", "RKnee"), ("LAnkle", "RAnkle")]
-    if protocol.protocol.family == "gait":
-        pairs = []
     flips = []
     for ln, rn in pairs:
         if lay.has(ln) and lay.has(rn):

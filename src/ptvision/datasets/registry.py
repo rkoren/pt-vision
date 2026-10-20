@@ -44,6 +44,7 @@ class DatasetSpec:
     notes: str
     files: tuple[DatasetFile, ...]
     target: str | None = None  # store under another dataset's directory
+    manual: bool = False  # no downloadable files: the user places the data under raw/ by hand
 
     @property
     def dir_name(self) -> str:
@@ -100,6 +101,7 @@ def load_manifest() -> dict[str, DatasetSpec]:
             notes=d.get("notes", ""),
             files=files,
             target=d.get("target"),
+            manual=bool(d.get("manual", False)),
         )
     return out
 
@@ -175,6 +177,8 @@ def pull(
     dirs.raw.mkdir(parents=True, exist_ok=True)
     dirs.derived.mkdir(parents=True, exist_ok=True)
     res = PullResult(spec, dirs)
+    if spec.manual:
+        return res  # nothing to download; the CLI prints the manual instructions
     prov = read_json(dirs.provenance) if dirs.provenance.exists() else {}
     files_prov: dict[str, dict[str, object]] = dict(prov.get("files", {}))
 
@@ -199,7 +203,7 @@ def pull(
         dst = dirs.raw / f.name
         # A file already on disk is kept when its checksum is known-good. The checksum is
         # recomputed when provenance has no record of it: a pull interrupted on a later file used
-        # to lose the record and download finished archives again (10 GB wasted on COMFI video).
+        # to lose the record and download finished archives again.
         have = dst.exists() and (
             not verify
             or not f.md5
@@ -241,11 +245,16 @@ def pull(
 def status(spec: DatasetSpec) -> dict[str, object]:
     dirs = DatasetDirs.for_spec(spec)
     present = [f.name for f in spec.files if (dirs.raw / f.name).exists()]
+    if spec.manual:
+        on_disk = dirs.raw.exists() and any(dirs.raw.iterdir())
+        files = "manual: present" if on_disk else "manual: absent"
+    else:
+        files = f"{len(present)}/{len(spec.files)}"
     return {
         "name": spec.name,
         "license": spec.license,
         "kind": spec.kind,
-        "files": f"{len(present)}/{len(spec.files)}",
+        "files": files,
         "size_gb": round(spec.total_size / 1e9, 2),
         "dir": str(dirs.root),
         "provenance": dirs.provenance.exists(),

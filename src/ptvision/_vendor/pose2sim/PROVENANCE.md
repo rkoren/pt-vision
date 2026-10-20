@@ -8,8 +8,7 @@
 | File here | Upstream source | Local modifications |
 |---|---|---|
 | skeletons.py | Pose2Sim/skeletons.py, HALPE_26 | anytree Node tree transcribed to (name, id, parent) tuples; verbatim tree kept in the docstring |
-| angles.py | Pose2Sim/common.py: angle_dict, points_to_angles, fixed_angles | extracted verbatim; only `import numpy as np` added |
-| trc_mot.py | Pose2Sim/common.py: read_mot, write_mot, read_trc, write_trc | extracted verbatim; imports added |
+| trc_mot.py | Pose2Sim/common.py: write_mot, write_trc | extracted verbatim; imports added |
 | filtering.py | Pose2Sim/filtering.py: hampel_filter | extracted verbatim; import added |
 | tracking.py | Pose2Sim/common.py: pad_shape, sort_people_sports2d | extracted verbatim; imports added |
 

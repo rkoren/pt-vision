@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ptvision.datasets.c3d import C3DTrial
+from ptvision.datasets.markers import MarkerTrial
 from ptvision.datasets.mocap_projection import ProjectedTrial, project_trial
 from ptvision.datasets.registry import DatasetDirs, load_manifest
 
@@ -74,8 +74,8 @@ MOVEMENTS = {
 }
 
 
-def read_vicon_positions(path: Path) -> C3DTrial:
-    """A UI-PRMD Vicon positions .txt as a C3DTrial (metres, no events)."""
+def read_vicon_positions(path: Path) -> MarkerTrial:
+    """A UI-PRMD Vicon positions .txt as a MarkerTrial (metres, no events)."""
     data = np.loadtxt(path, delimiter=",", dtype=np.float64)
     if data.ndim == 1:
         data = data[None, :]
@@ -83,7 +83,7 @@ def read_vicon_positions(path: Path) -> C3DTrial:
         raise ValueError(f"{path.name}: expected {3 * len(VICON_39)} columns, got {data.shape[1]}")
     pts = data.reshape(data.shape[0], len(VICON_39), 3) / 1000.0
     pts[np.all(pts == 0, axis=2)] = np.nan
-    return C3DTrial(path, VICON_RATE, list(VICON_39), pts, [], 0, "m")
+    return MarkerTrial(path, VICON_RATE, list(VICON_39), pts, 0, "m")
 
 
 @dataclass

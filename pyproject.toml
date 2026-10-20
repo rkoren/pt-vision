@@ -34,6 +34,7 @@ dependencies = [
   "platformdirs>=4.3,<5",
   "certifi>=2025.1",
   "opencv-python>=5,<6",
+  "rich>=13",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +43,7 @@ app = [
     "pyside6-essentials>=6.11.2,<7",
 ]
 datasets = [
-    "ezc3d>=1.7,<2",
+    "pyyaml>=6,<7",
 ]
 
 [dependency-groups]
@@ -87,7 +88,6 @@ ignore = ["RUF012", "RUF001", "RUF002", "RUF003"]
 testpaths = ["tests"]
 markers = [
   "model: requires downloaded ONNX weights (run `ptv models pull` first)",
-  "slow: slow test",
   "qt: needs PySide6 and pytest-qt (installed by the standard `uv sync`)",
 ]
 addopts = "-ra --strict-markers"

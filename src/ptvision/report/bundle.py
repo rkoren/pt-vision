@@ -49,7 +49,7 @@ class ReportBundle(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     disclaimer: str = DISCLAIMER
-    template: str = "sts.html.j2"  # [REVIEW] recorded so `ptv report` re-renders with the same one
+    template: str = "sts.html.j2"
 
 
 def _env() -> Environment:
