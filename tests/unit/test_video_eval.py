@@ -279,16 +279,22 @@ def test_evaluate_video_records_errors_per_trial(
 
 
 def test_cli_eval_video_help_and_manual_pull() -> None:
+    import re
+
     from typer.testing import CliRunner
 
     from ptvision.cli.main import app
 
+    def plain(text: str) -> str:
+        # rich colours the help on CI runners (CI=1), splitting option names with escape codes
+        return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
     runner = CliRunner()
-    assert "eval-video" in runner.invoke(app, ["datasets", "--help"]).output
+    assert "eval-video" in plain(runner.invoke(app, ["datasets", "--help"]).output)
     res = runner.invoke(app, ["datasets", "eval-video", "--help"])
-    assert res.exit_code == 0 and "--cameras" in res.output
+    assert res.exit_code == 0 and "--cameras" in plain(res.output)
     res = runner.invoke(app, ["datasets", "pull", "opencap"])
-    assert res.exit_code == 0 and "manual" in res.output.lower()
+    assert res.exit_code == 0 and "manual" in plain(res.output).lower()
 
 
 def test_lag_correction_direction() -> None:
