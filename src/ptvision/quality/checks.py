@@ -10,6 +10,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from ptvision.clinical.protocol import Protocol
+from ptvision.kinematics.view import OBLIQUE_MAX_RATIO, SAGITTAL_MAX_RATIO, view_ratio
 from ptvision.pose.track import PoseTrack
 from ptvision.trials.models import CameraCapture
 
@@ -55,11 +56,6 @@ def _mk(
         threshold=threshold,
         message=msg_ok if ok else msg_bad,
     )
-
-
-# Shoulder separation / trunk length, median over frames. Pure side view ≈ 0.1–0.3
-SAGITTAL_MAX_RATIO = 0.35
-OBLIQUE_MAX_RATIO = 0.50
 
 
 def _view_check(ratio: float, want_sagittal: bool, wanted: str) -> QualityCheck:
@@ -220,14 +216,8 @@ def check_track(
         )
 
     # View check: in side view the shoulders overlap
-    if all(lay.has(n) for n in ("LShoulder", "RShoulder", "Neck", "Hip")) and present.any():
-        ls, rs, nk, hp = (
-            coords[:, lay.index(n)] for n in ("LShoulder", "RShoulder", "Neck", "Hip")
-        )
-        with np.errstate(invalid="ignore"):
-            sep = np.abs(ls[:, 0] - rs[:, 0])
-            trunk = np.linalg.norm(nk - hp, axis=1)
-            ratio = float(np.nanmedian(sep / trunk))
+    ratio = view_ratio(track, person)
+    if ratio is not None:
         want_sagittal = protocol.capture.view in ("sagittal", "sagittal_left", "sagittal_right")
         out.append(_view_check(ratio, want_sagittal, protocol.capture.view))
 

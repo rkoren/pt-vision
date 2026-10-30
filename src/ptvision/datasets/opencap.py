@@ -11,7 +11,7 @@ Layout under `raw/subject<N>/`:
 Cameras stand on an arc in front of the subject (checked on frame grabs of subject2 STS1 and
 on the extrinsics): Cam2 faces the subject, Cam1/Cam3 sit about 45 degrees to either side,
 Cam0/Cam4 about 70 degrees. Cam0 is the most side-on view (subject nearly in profile, facing
-image-left); nothing is a true 90-degree side view.
+image-right; subject8 sat the other way round); nothing is a true 90-degree side view.
 
 Sign conventions of the IK coordinates were fixed by comparing with the marker-projected angles on
 subject2 STS1 (see notebooks/validation.ipynb), not against our video output.

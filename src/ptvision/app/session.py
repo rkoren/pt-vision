@@ -77,18 +77,8 @@ def _preprocess_config(prov: RunProvenance | None) -> PreprocessConfig | None:
     the analysis instead of the library defaults."""
     if prov is None or not prov.preprocess:
         return None
-    # the pipeline stores the config's fields flat alongside the preprocessing stats
-    p = prov.preprocess
-    try:
-        return PreprocessConfig(
-            score_threshold=float(str(p.get("score_threshold", 0.3))),
-            interp_max_gap_s=float(str(p.get("interp_max_gap_s", 0.3))),
-            hampel_window=int(str(p.get("hampel_window", 7))),
-            hampel_n_sigma=float(str(p.get("hampel_n_sigma", 2.0))),
-            filter_type=str(p.get("filter_type", "butterworth")),
-            filter_order=int(str(p.get("filter_order", 4))),
-            filter_cutoff_hz=float(str(p.get("filter_cutoff_hz", 6.0))),
-        )
+    try:  # the pipeline stores the config's fields flat alongside the preprocessing stats
+        return PreprocessConfig.from_dict(prov.preprocess)
     except (TypeError, ValueError):
         return None
 

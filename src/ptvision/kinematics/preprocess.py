@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from typing import Any
 
 import numpy as np
 from scipy import signal as sps
@@ -24,6 +26,13 @@ class PreprocessConfig:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> PreprocessConfig:
+        """Settings from a protocol's [preprocess] table or a run's provenance; other keys (the
+        segmentation cutoff, preprocessing statistics) are ignored."""
+        defaults = asdict(cls())
+        return cls(**{k: type(defaults[k])(v) for k, v in d.items() if k in defaults})
 
 
 def gate_by_score(coords: np.ndarray, score: np.ndarray, threshold: float) -> np.ndarray:

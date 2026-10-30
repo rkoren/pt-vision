@@ -557,13 +557,7 @@ def analyze(
 
     # 4. preprocess + angles
     stage("filtering")
-    pcfg = PreprocessConfig(
-        score_threshold=protocol.preprocess.score_threshold,
-        interp_max_gap_s=protocol.preprocess.interp_max_gap_s,
-        filter_type=protocol.preprocess.filter_type,
-        filter_order=protocol.preprocess.filter_order,
-        filter_cutoff_hz=protocol.preprocess.filter_cutoff_hz,
-    )
+    pcfg = PreprocessConfig.from_dict(protocol.preprocess.model_dump())
     pre = preprocess(single, pcfg)
     prov.preprocess = {
         **pcfg.to_dict(),
@@ -588,11 +582,7 @@ def analyze(
     # 5. segment
     stage("segmenting")
     seg_entry = registry.get_segmenter(protocol.segmenter.name)
-    seg_params = {
-        **protocol.segmenter.params,
-        "segment_signal_cutoff_hz": protocol.preprocess.segment_signal_cutoff_hz,
-        **opts.extra_params,
-    }
+    seg_params = {**protocol.segmenter_params(), **opts.extra_params}
     if opts.manual_start_s is not None:
         seg_params["manual_start_s"] = opts.manual_start_s
         seg_params["start_rule"] = "manual"
@@ -774,7 +764,7 @@ def analyze(
             f"{seg_entry.description.splitlines()[0] if seg_entry.description else ''}"
         ),
         (
-            f"Angles computed on the {angles.side} side (higher keypoint confidence). Tier 1 = "
+            f"Angles computed on the {angles.side} side (the side facing the camera). Tier 1 = "
             "timing/count (validated ICC > 0.9 vs clinicians); tier 2 = sagittal angles (knee "
             "about 8° RMSE against lab motion capture from a camera 20° off the side); ankle "
             "and frontal-plane measures are not reported."

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from rich.console import Console
@@ -24,6 +26,21 @@ def progress_bar() -> Progress:
         console=console,
         transient=True,
     )
+
+
+@contextmanager
+def stage_progress() -> Iterator[tuple[Callable[[int, int | None], None], Callable[[str], None]]]:
+    """A progress bar and the (progress, on_stage) callbacks the pipeline entry points take."""
+    with progress_bar() as prog:
+        task = prog.add_task("starting", total=None)
+
+        def on_progress(done: int, total: int | None) -> None:
+            prog.update(task, completed=done, total=total)
+
+        def on_stage(name: str) -> None:
+            prog.update(task, description=name, completed=0, total=None)
+
+        yield on_progress, on_stage
 
 
 def subject_from_flags(age: int | None, height_m: float | None, sex: str | None) -> Subject | None:

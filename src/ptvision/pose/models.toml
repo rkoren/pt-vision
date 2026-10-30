@@ -1,5 +1,6 @@
 # ONNX weight manifest. URLs are the ones rtmlib 0.0.16 uses for BodyWithFeet (Halpe-26).
-# sha256 values are of the downloaded archive; empty means "not yet pinned" (filled by `ptv models pull`).
+# sha256 values are of the downloaded archive; empty means not pinned, so the archive is used
+# unverified (`ptv models pull` prints the sha256 to record here).
 # All weights: MMPose project, Apache-2.0 (https://github.com/open-mmlab/mmpose).
 # Training-data note: Halpe-26 checkpoints are trained on the "body7" dataset mix, which includes the
 # Halpe dataset (no license file upstream). Residual licensing risk, recorded in NOTICE.

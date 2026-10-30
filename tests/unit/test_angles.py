@@ -5,6 +5,7 @@ from ptvision.kinematics.angles import (
     compute_angles,
     facing_direction,
     interior_angle,
+    resolve_side,
     segment_angle_from_vertical,
 )
 from ptvision.pose.layout import HALPE26
@@ -90,6 +91,22 @@ def test_trunk_lean_sign_follows_facing() -> None:
     assert facing_direction(tr) == -1
     a = compute_angles(tr, ["trunk_lean"], side="left")
     assert a["trunk_lean"][0] > 0
+
+
+def test_near_side_follows_facing_not_confidence() -> None:
+    # facing image-right shows the camera the right side, even when the far (left) leg scores higher
+    track, _tl = synthetic_sts_track(facing=1)
+    track.score[:, 0, HALPE26.indices("LHip", "LKnee", "LAnkle")] = 0.95
+    track.score[:, 0, HALPE26.indices("RHip", "RKnee", "RAnkle")] = 0.6
+    assert resolve_side(track, "near") == "right"
+    left, _tl = synthetic_sts_track(facing=-1)
+    assert resolve_side(left, "near") == "left"
+    # no feet or face tracked: the facing is unknown and the higher-confidence side is used
+    for name in ("LBigToe", "RBigToe", "LHeel", "RHeel", "Nose"):
+        track.score[:, 0, HALPE26.index(name)] = 0.0
+    assert facing_direction(track) == 0
+    assert resolve_side(track, "near") == "left"
+    assert compute_angles(track, ["trunk_lean"], side="near").facing == 1
 
 
 def test_near_side_selection_and_synthetic_ranges() -> None:

@@ -1,4 +1,4 @@
-"""[REVIEW] Same-name clips must not share a trial (two phones' IMG_0001.MOV used to reuse the first
+"""Same-name clips must not share a trial (two phones' IMG_0001.MOV used to reuse the first
 clip's capture and cached keypoints)."""
 
 from __future__ import annotations
