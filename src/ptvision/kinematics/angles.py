@@ -8,8 +8,8 @@ Conventions (documented in every report):
 - trunk_lean: trunk (pelvis -> neck) angle from image vertical, positive when leaning toward the
   direction the person faces (forward). Facing is inferred from toe-heel direction.
 
-Interior angles are unsigned, so they do not depend on which way the person faces. Side selection
-("near") picks the side whose hip/knee/ankle have the higher mean confidence.
+Interior angles are unsigned, so they do not depend on which way the person faces. The "near" side
+is the one turned toward the camera: a person facing image-right shows the camera their right side.
 """
 
 from __future__ import annotations
@@ -105,9 +105,8 @@ def segment_angle_from_vertical(base: np.ndarray, tip: np.ndarray) -> np.ndarray
 
 
 def facing_direction(track: PoseTrack, person: int = 0, min_score: float = 0.3) -> int:
-    """+1 if the person faces image-right, -1 if image-left.
-
-    Uses toe-heel direction first, nose-ear as a fallback, else +1."""
+    """+1 if the person faces image-right, -1 if image-left, 0 if neither the feet nor the face
+    show it. Uses toe-heel direction first, nose-ear as a fallback."""
     lay = track.layout
     votes: list[float] = []
     for toe, heel in (("LBigToe", "LHeel"), ("RBigToe", "RHeel")):
@@ -126,13 +125,19 @@ def facing_direction(track: PoseTrack, person: int = 0, min_score: float = 0.3) 
                 dx = track.keypoint(nose, person)[:, 0] - track.keypoint(ear, person)[:, 0]
                 votes.extend(dx[ok & ~np.isnan(dx)].tolist())
     if not votes:
-        return 1
+        return 0
     return 1 if float(np.median(votes)) >= 0 else -1
 
 
-def resolve_side(track: PoseTrack, side: Side, person: int = 0) -> Literal["left", "right"]:
+def resolve_side(
+    track: PoseTrack, side: Side, person: int = 0, *, facing: int | None = None
+) -> Literal["left", "right"]:
+    """figure out which side we're actually looking at"""
     if side in ("left", "right"):
         return side
+    facing = facing_direction(track, person) if facing is None else facing
+    if facing:
+        return "right" if facing > 0 else "left"
     scores = {}
     for s in ("L", "R"):
         names = [f"{s}Hip", f"{s}Knee", f"{s}Ankle"]
@@ -211,9 +216,10 @@ def compute_angles(
 ) -> AngleSeries:
     """Compute the requested angles (default: all) for one person of a filtered track."""
     names = names or list(ANGLE_DEFS)
-    resolved = resolve_side(track, side, person)
-    prefix = "L" if resolved == "left" else "R"
     facing = facing_direction(track, person)
+    resolved = resolve_side(track, side, person, facing=facing)
+    prefix = "L" if resolved == "left" else "R"
+    facing = facing or 1  # unknown facing: report trunk lean toward image-right as forward
     cols: dict[str, np.ndarray] = {}
     used: dict[str, AngleDef] = {}
     for name in names:

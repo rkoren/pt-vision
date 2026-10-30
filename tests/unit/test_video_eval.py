@@ -1,5 +1,5 @@
 """Video-vs-mocap evaluation: readers, force events, agreement statistics and the harness on a
-synthetic lab trial.  [REVIEW] new file"""
+synthetic lab trial"""
 
 from __future__ import annotations
 
@@ -257,6 +257,13 @@ def test_evaluate_video_on_synthetic_trial(tmp_path: Path, monkeypatch: pytest.M
     assert {"knee_flexion_video", "knee_flexion_mocap", "in_window"} <= set(frames.columns)
     summary = (out / "summary.json").read_text()
     assert '"by_camera"' in summary and '"cam0"' in summary
+    # the leg facing the camera is scored, and the other leg alongside it for comparison
+    assert r.side == "right" and r.side_by_confidence in ("left", "right")
+    assert r.metrics["hip_flexion_far_rmse"] is not None
+    from ptvision.datasets.video_eval_tables import camera_table, load_rows, side_table
+
+    rows = load_rows(out)
+    assert "| cam0 |" in camera_table(rows) and "| cam0 |" in side_table(rows)
 
 
 def test_evaluate_video_records_errors_per_trial(

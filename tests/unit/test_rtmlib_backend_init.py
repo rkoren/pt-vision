@@ -1,4 +1,4 @@
-"""[REVIEW] Non-onnxruntime backends used to run ORT-only lines and crash in __init__."""
+"""Non-onnxruntime backends used to run ORT-only lines and crash in __init__."""
 
 from __future__ import annotations
 

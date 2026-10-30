@@ -61,7 +61,7 @@ def test_render_minimal_bundle() -> None:
     assert 'class="banner warn"' in html
 
 
-# [REVIEW] regression tests for the default report template and `ptv report`
+# regression tests for the default report template and `ptv report`
 def test_protocol_without_report_section_renders(tmp_path: Path) -> None:
     text = resources.files("ptvision.clinical.protocols").joinpath("sts_5x.toml").read_text()
     head, _, tail = text.partition("[report]")

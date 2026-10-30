@@ -13,7 +13,7 @@ import typer
 from rich.table import Table
 
 from ptvision._version import __version__
-from ptvision.cli.common import console, err, progress_bar, subject_from_flags
+from ptvision.cli.common import console, err, stage_progress, subject_from_flags
 from ptvision.config import settings
 
 app = typer.Typer(
@@ -140,6 +140,7 @@ def pose(
 ) -> None:
     """Extract Halpe-26 keypoints from a video into Parquet (+ confidence-colored overlay video)"""
     from ptvision.pipeline import AnalyzeOptions, TrialMismatchError, pose_only
+    from ptvision.trials.store import TrialDir
     from ptvision.video import require_ffmpeg
 
     require_ffmpeg()
@@ -153,28 +154,14 @@ def pose(
         overlay=overlay,
         reuse_pose=reuse,
     )
-    with progress_bar() as prog:
-        task = prog.add_task("starting", total=None)
-
-        def on_progress(done: int, total: int | None) -> None:
-            prog.update(task, completed=done, total=total)
-
-        def on_stage(name: str) -> None:
-            prog.update(task, description=name, completed=0, total=None)
-
+    with stage_progress() as (on_progress, on_stage):
         try:
             result = pose_only(video, opts, progress=on_progress, on_stage=on_stage)
         except TrialMismatchError as e:
             err.print(f"[red]{e}[/]")
             raise typer.Exit(1) from e
 
-    capture = result.run.path.parent.parent  # trial dir
-    cap = (
-        __import__("ptvision.trials.store", fromlist=["TrialDir"])
-        .TrialDir(capture)
-        .read_capture()
-        .cameras[0]
-    )
+    cap = TrialDir(result.run.path.parent.parent).read_capture().cameras[0]
     console.print(
         f"[bold]ingest[/] {cap.source_codec} {cap.source_width}x{cap.source_height} "
         f"@ {cap.source_fps_avg:.2f} fps{' VFR' if cap.source_is_vfr else ''}"
@@ -336,15 +323,7 @@ def analyze(
     if color_by not in (None, "rules", "confidence"):
         err.print("[red]--color-by must be rules or confidence[/]")
         raise typer.Exit(2)
-    with progress_bar() as prog:
-        task = prog.add_task("starting", total=None)
-
-        def on_progress(done: int, total: int | None) -> None:
-            prog.update(task, completed=done, total=total)
-
-        def on_stage(name: str) -> None:
-            prog.update(task, description=name, completed=0, total=None)
-
+    with stage_progress() as (on_progress, on_stage):
         try:
             res = _analyze(source, opts, progress=on_progress, on_stage=on_stage)
         except RuntimeError as e:

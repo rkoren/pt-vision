@@ -67,6 +67,19 @@ def test_preprocess_pipeline_keeps_shape_and_marks_stage() -> None:
         preprocess(_two_person(track))
 
 
+def test_preprocess_config_from_protocol_and_provenance() -> None:
+    from ptvision.clinical.protocol import load_protocol
+
+    proto = load_protocol("sts_5x")
+    cfg = PreprocessConfig.from_dict(proto.preprocess.model_dump())
+    assert cfg.filter_cutoff_hz == proto.preprocess.filter_cutoff_hz
+    assert cfg.hampel_window == PreprocessConfig().hampel_window  # not a protocol setting
+    assert proto.segmenter_params()["segment_signal_cutoff_hz"] == 3.0
+    # a run's provenance holds the fields flat next to statistics, possibly as strings
+    again = PreprocessConfig.from_dict({**cfg.to_dict(), "filter_order": "2", "missing": 0.1})
+    assert again.filter_order == 2 and again.score_threshold == cfg.score_threshold
+
+
 def _two_person(track):  # type: ignore[no-untyped-def]
     from ptvision.pose.track import PoseTrack
 

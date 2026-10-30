@@ -31,7 +31,9 @@ ViewMethod = Literal["thigh_length", "shoulders", "none"]
 SHOULDER_WIDTH_FRAC = 0.259
 HIP_TO_SHOULDER_FRAC = 0.288
 SHOULDER_TO_TRUNK_RATIO = SHOULDER_WIDTH_FRAC / HIP_TO_SHOULDER_FRAC
-MAX_VIEW_RATIO = 0.50
+# view_ratio bands of the camera_view quality check
+SAGITTAL_MAX_RATIO = 0.35
+OBLIQUE_MAX_RATIO = 0.50
 MIN_COS_THETA = 0.5  # 60° off the side
 
 
@@ -90,7 +92,7 @@ def estimate_view_shoulders(track: PoseTrack, person: int = 0) -> ViewEstimate:
         return ViewEstimate("shoulders", 1.0, None, False, "shoulders or trunk not tracked")
     sin_theta = min(1.0, ratio / SHOULDER_TO_TRUNK_RATIO)
     cos_theta = float(np.sqrt(max(0.0, 1.0 - sin_theta**2)))
-    if ratio >= MAX_VIEW_RATIO or cos_theta < MIN_COS_THETA:
+    if ratio >= OBLIQUE_MAX_RATIO or cos_theta < MIN_COS_THETA:
         return ViewEstimate("shoulders", cos_theta, ratio, False, "view is not side or oblique")
     return ViewEstimate("shoulders", cos_theta, ratio, True)
 
@@ -112,7 +114,7 @@ def estimate_view_thigh_length(
     ratio = float(lo / hi) if hi > 0 else 1.0
     cos_theta = float(min(1.0, ratio))
     vr = view_ratio(track, person)
-    if (vr is not None and vr >= MAX_VIEW_RATIO) or cos_theta < MIN_COS_THETA:
+    if (vr is not None and vr >= OBLIQUE_MAX_RATIO) or cos_theta < MIN_COS_THETA:
         return ViewEstimate("thigh_length", cos_theta, ratio, False, "view is not side or oblique")
     return ViewEstimate("thigh_length", cos_theta, ratio, True)
 

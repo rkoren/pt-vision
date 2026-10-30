@@ -1,5 +1,5 @@
 """Camera-view correction: geometry of the rectification, the two cos θ estimators, the guards,
-and the record the pipeline keeps.  [REVIEW] new file"""
+and the record the pipeline keeps"""
 
 from __future__ import annotations
 

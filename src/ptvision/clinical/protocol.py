@@ -146,6 +146,11 @@ class Protocol(BaseModel):
     def rule_list(self) -> list[Rule]:
         return [r.to_rule() for r in self.rules]
 
+    def segmenter_params(self) -> dict[str, Any]:
+        """The segmenter's parameters plus the cutoff it low-passes its signal at."""
+        cutoff = self.preprocess.segment_signal_cutoff_hz
+        return {**self.segmenter.params, "segment_signal_cutoff_hz": cutoff}
+
     def primary_metric(self) -> MetricSpec | None:
         for m in self.metrics:
             if m.primary:

@@ -18,7 +18,7 @@ import time
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -28,6 +28,7 @@ from ptvision.datasets.registry import DatasetDirs, load_manifest
 from ptvision.datasets.sts_force import match_reps
 
 ANGLES: tuple[str, ...] = JOINT_ANGLE_COLUMNS
+SIDED: tuple[str, ...] = ("knee_flexion", "hip_flexion")  # angles that use one leg
 DATASETS: tuple[str, ...] = ("opencap",)
 # Segment inclinations (degrees from vertical, forward positive) scored vs lab
 SEGMENTS: dict[str, tuple[str, str]] = {
@@ -167,7 +168,8 @@ class TrialCameraResult:
     note: str = ""
     fps: float | None = None
     n_frames: int = 0
-    side: str = ""
+    side: str = ""  # the side facing the camera (kinematics.angles.resolve_side)
+    side_by_confidence: str = ""  # the side with the higher keypoint confidence, for comparison
     facing: int = 0
     n_persons: int = 0
     n_persons_real: int = 0
@@ -233,7 +235,7 @@ def evaluate_trial_camera(
     frames_dir: Path,
 ) -> tuple[TrialCameraResult, list[EventRow]]:
     from ptvision.clinical.segmenters.sts import StsParams, segment_sts
-    from ptvision.kinematics.angles import compute_angles
+    from ptvision.kinematics.angles import compute_angles, resolve_side
     from ptvision.kinematics.preprocess import PreprocessConfig, preprocess
     from ptvision.kinematics.view import (
         estimate_view_shoulders,
@@ -279,13 +281,7 @@ def evaluate_trial_camera(
             res.camera_view_status = chk.status
             res.camera_view_value = round(float(chk.value), 3) if chk.value is not None else None
 
-    pcfg = PreprocessConfig(
-        score_threshold=protocol.preprocess.score_threshold,
-        interp_max_gap_s=protocol.preprocess.interp_max_gap_s,
-        filter_type=protocol.preprocess.filter_type,
-        filter_order=protocol.preprocess.filter_order,
-        filter_cutoff_hz=protocol.preprocess.filter_cutoff_hz,
-    )
+    pcfg = PreprocessConfig.from_dict(protocol.preprocess.model_dump())
     pre = preprocess(single, pcfg)
     ours = compute_angles(pre.filtered, list(ANGLES), side="near")
     res.side, res.facing = ours.side, int(ours.facing)
@@ -320,6 +316,14 @@ def evaluate_trial_camera(
     for name in ANGLES:
         a = _shift(ours[name][:n], shift)
         res.metrics.update(Agreement.of(a[win], ref_angles[name][:n][win]).flat(f"{name}_synced"))
+
+    res.side_by_confidence = resolve_side(pre.filtered, "near", facing=0)
+    far: Literal["left", "right"] = "left" if ours.side == "right" else "right"
+    ours_far = compute_angles(pre.filtered, list(SIDED), side=far)
+    ref_far = compute_angles(ref.track, list(SIDED), side=far)
+    for name in SIDED:
+        a = _shift(ours_far[name][:n], shift)
+        res.metrics.update(Agreement.of(a[win], ref_far[name][:n][win]).flat(f"{name}_far"))
     seg_ours = segment_angles(pre.filtered, ours.side, ours.facing)
     seg_ref = segment_angles(ref.track, ours.side, ref_angles.facing)
     for name in SEGMENTS:
@@ -362,10 +366,7 @@ def evaluate_trial_camera(
             res.metrics.update(Agreement.of(ours[name][:n][win], b[win]).flat(f"{name}_model"))
 
     # 4. sit-to-stand events against the force plates
-    seg_params: dict[str, Any] = {
-        **protocol.segmenter.params,
-        "segment_signal_cutoff_hz": protocol.preprocess.segment_signal_cutoff_hz,
-    }
+    seg_params = protocol.segmenter_params()
     if trial.n_reps_expected < 0:  # count reps
         seg_params.update(n_reps_expected=-1, end_rule="window", window_s=n / fps + 1.0)
     else:
@@ -612,7 +613,9 @@ def _group_summary(rs: list[TrialCameraResult]) -> dict[str, Any]:
     ok = [r for r in rs if r.status == "ok"]
     out: dict[str, Any] = {"trials": len(rs), "ok": len(ok), "errors": len(rs) - len(ok)}
     for name in ANGLES:
-        for ref in ("mocap", "synced", "model", "rect_thigh", "rect_shoulders"):
+        for ref in ("mocap", "synced", "far", "model", "rect_thigh", "rect_shoulders"):
+            if ref == "far" and name not in SIDED:
+                continue
             for stat in ("rmse", "bias", "r", "slope"):
                 out[f"{name}_{ref}_{stat}"] = _agg(
                     [r.metrics.get(f"{name}_{ref}_{stat}") for r in ok]

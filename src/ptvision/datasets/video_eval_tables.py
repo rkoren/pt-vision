@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from statistics import median
 
@@ -31,6 +32,14 @@ def _header(cols: list[str]) -> list[str]:
     return ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
 
 
+def _by_camera(rows: list[dict[str, str]]) -> Iterator[tuple[int, list[dict[str, str]]]]:
+    """(camera, its scored rows) for every camera with at least one scored row."""
+    for cam in sorted({int(r["camera"]) for r in rows}):
+        rs = [r for r in rows if int(r["camera"]) == cam and r["status"] == "ok"]
+        if rs:
+            yield cam, rs
+
+
 def camera_table(rows: list[dict[str, str]]) -> str:
     out = _header(
         [
@@ -48,10 +57,7 @@ def camera_table(rows: list[dict[str, str]]) -> str:
             "view check",
         ]
     )
-    for cam in sorted({int(r["camera"]) for r in rows}):
-        rs = [r for r in rows if int(r["camera"]) == cam and r["status"] == "ok"]
-        if not rs:
-            continue
+    for cam, rs in _by_camera(rows):
         passes = sum(1 for r in rs if r["camera_view_status"] == "pass")
         cells = [
             f"cam{cam}",
@@ -66,6 +72,41 @@ def camera_table(rows: list[dict[str, str]]) -> str:
             _f(_med(rs, "seat_off_err_synced_ms_mean"), 0, " ms"),
             _f(_med(rs, "span_err_s"), 2, " s"),
             f"{passes}/{len(rs)} pass",
+        ]
+        out.append("| " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
+def side_table(rows: list[dict[str, str]]) -> str:
+    """Per camera: how often the leg with the higher keypoint confidence is not the leg facing the
+    camera, and how each leg's lag-corrected knee and hip angles agree with the lab's same leg"""
+    out = _header(
+        [
+            "camera",
+            "view",
+            "n",
+            "higher-confidence leg is the far one",
+            "knee RMSE near leg",
+            "knee RMSE far leg",
+            "knee slope near leg",
+            "knee slope far leg",
+            "hip RMSE near leg",
+            "hip RMSE far leg",
+        ]
+    )
+    for cam, rs in _by_camera(rows):
+        far = sum(1 for r in rs if r.get("side_by_confidence") not in (None, "", r["side"]))
+        cells = [
+            f"cam{cam}",
+            _f(rs[0]["view_deg"], 0, "°"),
+            str(len(rs)),
+            f"{far}/{len(rs)}",
+            _f(_med(rs, "knee_flexion_synced_rmse")),
+            _f(_med(rs, "knee_flexion_far_rmse")),
+            _f(_med(rs, "knee_flexion_synced_slope"), 2),
+            _f(_med(rs, "knee_flexion_far_slope"), 2),
+            _f(_med(rs, "hip_flexion_synced_rmse")),
+            _f(_med(rs, "hip_flexion_far_rmse")),
         ]
         out.append("| " + " | ".join(cells) + " |")
     return "\n".join(out)
@@ -143,10 +184,7 @@ def correction_table(rows: list[dict[str, str]]) -> str:
     for _tag, label in CORRECTIONS:
         cols += [f"knee RMSE {label}", f"hip RMSE {label}", f"trunk RMSE {label}"]
     out = _header(cols)
-    for cam in sorted({int(r["camera"]) for r in rows}):
-        rs = [r for r in rows if int(r["camera"]) == cam and r["status"] == "ok"]
-        if not rs:
-            continue
+    for cam, rs in _by_camera(rows):
         cells = [
             f"cam{cam}",
             _f(rs[0]["view_deg"], 0, "°"),
@@ -230,6 +268,8 @@ def main(names: list[str]) -> None:
         print(f"## {name}\n")
         print(headline(rows, d) + "\n")
         print(camera_table(rows) + "\n")
+        print("Near leg against far leg:\n")
+        print(side_table(rows) + "\n")
         side = tuple(
             int(c) for c in {r["camera"] for r in rows} if abs(float(_view(rows, c))) >= 60
         ) or tuple(int(c) for c in {r["camera"] for r in rows})
