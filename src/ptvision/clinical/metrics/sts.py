@@ -12,12 +12,25 @@ from ptvision.clinical.registry import METRICS, register_metric
 from ptvision.clinical.segmenters.sts import StsEvents
 
 # Reference values are from Bohannon 2006 (doi:10.2466/pms.103.1.215-222)
+BERTRAND_2026 = (
+    "Bertrand JK et al. PLOS Digit Health 2026;5(1):e0001172, doi:10.1371/journal.pdig.0001172"
+)
 CITE_5XSTS = (
     "Bohannon RW. Percept Mot Skills 2006;103:215-222, doi:10.2466/pms.103.1.215-222 (reference "
-    "values); video vs clinician timing: Bertrand et al. 2026 (DOI unconfirmed)."
+    f"values); markerless timing vs clinician (another app): {BERTRAND_2026}."
 )
-CITE_30S = "Video vs clinician count: Bertrand et al. 2026"
-CITE_ANGLES = "2D video sit-to-stand angles vs mocap: Hwang et al. 2026"
+CITE_30S = f"Markerless count vs clinician (another app): {BERTRAND_2026}."
+CITE_ANGLES = (
+    "Error: RMSE against lab motion capture at force-plate seat-offs, phones 20-30° off the side "
+    "(OpenCap LabValidation, Uhlrich et al. 2023; notebooks/validation.ipynb)."
+)
+# [REVIEW] the ± of each angle metric: in the eval-video summary.json, by_view["70"]
+# <metric>_shipped_rmse median (the protocol's shoulder stretch), evaluated 2026-10-30 (UTC)
+ANGLE_RMSE_DEG = {
+    "knee_flexion_at_seat_off": 10.7,
+    "trunk_lean_at_seat_off": 2.6,
+    "peak_trunk_lean_rising": 2.5,
+}
 CITE_DERIVED = (
     "Derived from the same seat-off and stand events as the total time; not separately validated."
 )
@@ -175,12 +188,12 @@ def _angle_at(ctx: MetricContext, angle: str, frames: list[int]) -> list[float]:
     return [float(a[f]) for f in frames if 0 <= f < len(a) and not np.isnan(a[f])]
 
 
-def _angle_metric(name: str, vals: list[float], rmse: float, side: str) -> Metric:
+def _angle_metric(name: str, vals: list[float], side: str) -> Metric:
     mean, _sd = _mean_sd(vals)
     return _make(
         name,
         value=None if mean is None else round(mean),
-        error=rmse,
+        error=ANGLE_RMSE_DEG[name],
         error_kind="rmse",
         n_events=len(vals),
         side=side,
@@ -190,7 +203,7 @@ def _angle_metric(name: str, vals: list[float], rmse: float, side: str) -> Metri
 
 @register_metric(
     "trunk_lean_at_seat_off",
-    version="0.1.0",
+    version="0.1.1",
     tier=2,
     label="Trunk forward lean at seat-off",
     units="deg",
@@ -200,12 +213,12 @@ def trunk_lean_at_seat_off(ctx: MetricContext) -> Metric:
     """Trunk angle from vertical when the pelvis starts rising, averaged over repetitions."""
     ev = _events(ctx)
     vals = _angle_at(ctx, "trunk_lean", [r.seat_off for r in ev.reps])
-    return _angle_metric("trunk_lean_at_seat_off", vals, 4.0, "bilateral")
+    return _angle_metric("trunk_lean_at_seat_off", vals, "bilateral")
 
 
 @register_metric(
     "peak_trunk_lean_rising",
-    version="0.1.0",
+    version="0.1.1",
     tier=2,
     label="Peak trunk forward lean during rise",
     units="deg",
@@ -222,12 +235,12 @@ def peak_trunk_lean_rising(ctx: MetricContext) -> Metric:
             seg = a[s : r.stand_reached + 1]
             if seg.size and not np.all(np.isnan(seg)):
                 vals.append(float(np.nanmax(seg)))
-    return _angle_metric("peak_trunk_lean_rising", vals, 4.0, "bilateral")
+    return _angle_metric("peak_trunk_lean_rising", vals, "bilateral")
 
 
 @register_metric(
     "knee_flexion_at_seat_off",
-    version="0.1.0",
+    version="0.1.1",
     tier=2,
     label="Knee flexion at seat-off",
     units="deg",
@@ -237,4 +250,4 @@ def knee_flexion_at_seat_off(ctx: MetricContext) -> Metric:
     """Knee flexion (near side) at seat-off, averaged over repetitions."""
     ev = _events(ctx)
     vals = _angle_at(ctx, "knee_flexion", [r.seat_off for r in ev.reps])
-    return _angle_metric("knee_flexion_at_seat_off", vals, 5.9, ctx.angles.side)
+    return _angle_metric("knee_flexion_at_seat_off", vals, ctx.angles.side)

@@ -7,7 +7,7 @@ import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from statistics import median
+from statistics import mean, median, stdev
 
 from ptvision.datasets.registry import DatasetDirs, load_manifest
 
@@ -172,29 +172,137 @@ def segment_table(rows: list[dict[str, str]], cameras: tuple[int, ...]) -> str:
 
 CORRECTIONS = (
     ("synced", "as filmed"),
-    ("rect_thigh", "thigh-length"),
-    ("rect_shoulders", "shoulders"),
+    ("rect_shoulders", "shoulder stretch"),
+    ("rect_level", "perspective, level camera"),
+    ("rect_calibrated", "perspective, lab calibration"),
 )
 
 
-def correction_table(rows: list[dict[str, str]]) -> str:
-    """Per camera: the camera's angle off the side (nominal and as estimated from the video) and
-    the lag-corrected knee / hip / trunk RMSE before and after the view correction."""
-    cols = ["camera", "view", "n", "cos θ nominal", "cos θ thigh", "cos θ shoulders"]
-    for _tag, label in CORRECTIONS:
-        cols += [f"knee RMSE {label}", f"hip RMSE {label}", f"trunk RMSE {label}"]
-    out = _header(cols)
+def geometry_table(rows: list[dict[str, str]]) -> str:
+    """Per camera: its angle off the side as placed (nominal), as calibrated by the lab, and as
+    the shoulder estimate reads it from the video; its tilt; and whether the shoulders tell the
+    camera's side (front or back of the person) the way the calibration does."""
+    cols = ["camera", "view", "n", "cos θ nominal", "cos θ lab calibration", "cos θ shoulders"]
+    out = _header([*cols, "tilt below level", "shoulders tell front from back"])
     for cam, rs in _by_camera(rows):
+        known = [r for r in rs if r.get("front_shoulders") not in (None, "", "0")]
+        agree = sum(1 for r in known if r["front_shoulders"] == r.get("front_calibrated"))
         cells = [
             f"cam{cam}",
             _f(rs[0]["view_deg"], 0, "°"),
             str(len(rs)),
             _f(_med(rs, "cos_theta_nominal"), 2),
-            _f(_med(rs, "cos_theta_thigh"), 2),
+            _f(_med(rs, "cos_theta_calibrated"), 2),
             _f(_med(rs, "cos_theta_shoulders"), 2),
+            _f(_med(rs, "pitch_deg_calibrated"), 1, "°"),
+            f"{agree}/{len(known)}",
         ]
-        for tag, _label in CORRECTIONS:
-            cells += [_f(_med(rs, f"{a}_{tag}_rmse")) for a in ANGLES]
+        out.append("| " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
+def correction_table(rows: list[dict[str, str]]) -> str:
+    """Per camera and view correction: the lag-corrected knee / hip / trunk RMSE, over the
+    trial-cameras the correction applies to."""
+    out = _header(["camera", "view", "correction", "n", "knee RMSE", "hip RMSE", "trunk RMSE"])
+    for cam, rs in _by_camera(rows):
+        for tag, label in CORRECTIONS:
+            done = [r for r in rs if r.get(f"knee_flexion_{tag}_rmse") not in (None, "")]
+            if not done:
+                continue
+            cells = [f"cam{cam}", _f(rs[0]["view_deg"], 0, "°"), label, str(len(done))]
+            cells += [_f(_med(done, f"{a}_{tag}_rmse")) for a in ANGLES]
+            out.append("| " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
+EVENT_METRICS = ("knee_flexion_at_seat_off", "trunk_lean_at_seat_off", "peak_trunk_lean_rising")
+
+
+def event_table(rows: list[dict[str, str]], cameras: tuple[int, ...]) -> str:
+    """The reported angle metrics at the force-plate seat-offs, video − lab (lag-corrected),
+    medians of the per-trial bias and RMSE over the given cameras. "as reported" is what the
+    protocol outputs: the shoulder stretch where it applies, the angles as filmed elsewhere."""
+    rs = [r for r in rows if r["status"] == "ok" and int(r["camera"]) in cameras]
+    out = _header(["metric", "correction", "n", "bias", "RMSE"])
+    for metric in EVENT_METRICS:
+        for tag, label in (("shipped", "as reported"), *CORRECTIONS):
+            done = [r for r in rs if r.get(f"{metric}_{tag}_rmse") not in (None, "")]
+            if not done:
+                continue
+            cells = [metric.replace("_", " "), label, str(len(done))]
+            cells += [
+                _f(_med(done, f"{metric}_{tag}_bias"), 1, "°"),
+                _f(_med(done, f"{metric}_{tag}_rmse"), 1, "°"),
+            ]
+            out.append("| " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
+KNEE_STEPS = (
+    ("rect_shoulders", "shoulder stretch (as reported)"),
+    ("rect_level", "perspective: camera angle from the shoulders, camera taken as level"),
+    ("rect_true_yaw", "+ the lab's camera angle"),
+    ("rect_true_tilt", "+ the lab's camera tilt"),
+    ("rect_calibrated", "+ lens distortion removed (the lab calibration)"),
+)
+
+
+def knee_steps_table(rows: list[dict[str, str]], cameras: tuple[int, ...]) -> str:
+    """The knee as the lab's calibration replaces the perspective model's inputs one at a time,
+    medians over the given cameras: at the force-plate seat-offs, over the movement, and the
+    slope against the lab. What each step removes is what that input costs."""
+    rs = [r for r in rows if r["status"] == "ok" and int(r["camera"]) in cameras]
+    out = _header(
+        ["inputs", "n", "bias at seat-off", "RMSE at seat-off", "RMSE over the movement", "slope"]
+    )
+    for tag, label in KNEE_STEPS:
+        done = [r for r in rs if r.get(f"knee_flexion_at_seat_off_{tag}_rmse") not in (None, "")]
+        if not done:
+            continue
+        cells = [label, str(len(done))]
+        cells += [
+            _f(_med(done, f"knee_flexion_at_seat_off_{tag}_bias"), 1, "°"),
+            _f(_med(done, f"knee_flexion_at_seat_off_{tag}_rmse"), 1, "°"),
+            _f(_med(done, f"knee_flexion_{tag}_rmse"), 1, "°"),
+            _f(_med(done, f"knee_flexion_{tag}_slope"), 2),
+        ]
+        out.append("| " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
+def offset_table(rows: list[dict[str, str]], cameras: tuple[int, ...]) -> str:
+    """How steady the knee's error at seat-off is over the given cameras: its median, its spread
+    over trial-cameras and over subjects' means, and the spread of the difference between a
+    subject's first two trials from the same camera. A steady offset matters less for following
+    one patient with one setup than its size suggests."""
+    rs = [r for r in rows if r["status"] == "ok" and int(r["camera"]) in cameras]
+    cols = ["correction", "n", "median bias", "SD over trial-cameras", "SD of subject means"]
+    out = _header([*cols, "SD of a subject's trial-to-trial difference, same camera"])
+    for tag, label in KNEE_STEPS[:2] + KNEE_STEPS[-1:]:
+        key = f"knee_flexion_at_seat_off_{tag}_bias"
+        done = [r for r in rs if r.get(key) not in (None, "")]
+        if len(done) < 2:
+            continue
+        by_subject: dict[str, list[float]] = {}
+        by_camera: dict[tuple[str, str], dict[str, float]] = {}
+        for r in done:
+            by_subject.setdefault(r["subject"], []).append(float(r[key]))
+            by_camera.setdefault((r["subject"], r["camera"]), {})[r["task"]] = float(r[key])
+        diffs = []
+        for trials in by_camera.values():
+            if len(trials) >= 2:
+                first, second = sorted(trials)[:2]
+                diffs.append(trials[first] - trials[second])
+        means = [mean(v) for v in by_subject.values()]
+        cells = [
+            label,
+            str(len(done)),
+            _f(_med(done, key), 1, "°"),
+            _f(stdev(float(r[key]) for r in done), 1, "°"),
+            _f(stdev(means) if len(means) > 1 else None, 1, "°"),
+            _f(stdev(diffs) if len(diffs) > 1 else None, 1, "°"),
+        ]
         out.append("| " + " | ".join(cells) + " |")
     return "\n".join(out)
 
@@ -280,8 +388,16 @@ def main(names: list[str]) -> None:
             f"Segment inclinations over the same cameras ({cams}), medians of per-trial values:\n"
         )
         print(segment_table(rows, side) + "\n")
+        print("Camera geometry:\n")
+        print(geometry_table(rows) + "\n")
         print("View correction per camera:\n")
         print(correction_table(rows) + "\n")
+        print(f"Reported angle metrics at the force-plate seat-offs ({cams}):\n")
+        print(event_table(rows, side) + "\n")
+        print(f"The knee, one calibrated input at a time ({cams}):\n")
+        print(knee_steps_table(rows, side) + "\n")
+        print(f"How steady the knee's offset at seat-off is ({cams}):\n")
+        print(offset_table(rows, side) + "\n")
         print(f"View correction per subject ({cams}):\n")
         print(correction_subject_table(rows, side) + "\n")
         print(f"Slopes video vs lab ({cams}):\n")

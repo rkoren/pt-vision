@@ -43,9 +43,6 @@ uv run pytest -m "not model"
 uv run ptv models pull --mode lightweight && uv run pytest    # full suite incl. the model test
 ```
 
-Pose speed on an M4 Pro CPU with the detector every 4th frame (the default): about 28 fps in
-`balanced` mode and 86 fps in `lightweight` (`uv run ptv bench clip.mp4` reproduces it).
-
 ## Layout
 
 ```

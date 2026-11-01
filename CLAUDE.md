@@ -35,7 +35,7 @@ uv run ptv datasets eval-video --dataset opencap   # video vs lab mocap (manual 
 - Validation evidence lives in `notebooks/validation.ipynb`, with tables computed from evaluation
   outputs, never typed. Evaluation datasets are held out: no pipeline parameter is tuned on them.
 - Commit only when asked. Comment large code changes or new files with "[REVIEW]" and nudge a review
-  with that tag present. Work items are GitHub issues; `CONTRIBUTING.md` has the workflow.
+  with that tag present. Work items are GitHub issues.
 
 ## Milestone checks
 

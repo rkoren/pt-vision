@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 import subprocess
 import sys
 from collections import OrderedDict
@@ -133,6 +134,123 @@ def probe(path: Path | str) -> VideoInfo:
         duration_s=float(duration) if duration not in (None, "N/A") else None,
         creation_time=creation,
     )
+
+
+# lens metadata reader for iOS devices
+LENS_KEYS = {
+    "com.apple.quicktime.make": "make",
+    "com.apple.quicktime.model": "model",
+    "com.apple.quicktime.camera.lens_model": "lens_model",
+    "com.apple.quicktime.camera.focal_length.35mm_equivalent": "focal_length_35mm",
+}
+_MAX_MOOV_BYTES = 64 * 2**20
+
+
+@dataclass(frozen=True)
+class LensInfo:
+    make: str | None = None
+    model: str | None = None
+    lens_model: str | None = None  # e.g. "iPhone 17 Pro back camera 6.765mm f/1.78"
+    focal_length_35mm: float | None = None
+
+
+def _boxes(buf: bytes, start: int, end: int) -> Iterator[tuple[bytes, int, int]]:
+    """(type, payload start, box end) of the ISO-BMFF boxes in buf[start:end]."""
+    i = start
+    while i + 8 <= end:
+        size, typ = int.from_bytes(buf[i : i + 4], "big"), buf[i + 4 : i + 8]
+        head = 8
+        if size == 1:
+            size, head = int.from_bytes(buf[i + 8 : i + 16], "big"), 16
+        elif size == 0:
+            size = end - i
+        if size < head or i + size > end:
+            return
+        yield typ, i + head, i + size
+        i += size
+
+
+def _meta_items(buf: bytes, start: int, end: int) -> dict[str, str | float]:
+    """The whitelisted entries of one `meta` box (QuickTime layout, or ISO with version/flags)."""
+    if buf[start + 4 : start + 8] != b"hdlr" and buf[start + 8 : start + 12] == b"hdlr":
+        start += 4
+    keys: dict[int, str] = {}
+    out: dict[str, str | float] = {}
+    for typ, s, e in _boxes(buf, start, end):
+        if typ == b"keys":
+            j = s + 8  # version/flags, entry count
+            for index in range(1, int.from_bytes(buf[s + 4 : s + 8], "big") + 1):
+                size = int.from_bytes(buf[j : j + 4], "big")
+                if size < 8:
+                    break
+                keys[index] = buf[j + 8 : j + size].decode("utf-8", "replace")
+                j += size
+        elif typ == b"ilst":
+            for item, s2, e2 in _boxes(buf, s, e):
+                field = LENS_KEYS.get(keys.get(int.from_bytes(item, "big"), ""))
+                if field is None:
+                    continue  # only the keys we use are decoded (never location or faces)
+                for dtyp, s3, e3 in _boxes(buf, s2, e2):
+                    if dtyp != b"data":
+                        continue
+                    kind, raw = int.from_bytes(buf[s3 : s3 + 4], "big") & 0xFFFFFF, buf[s3 + 8 : e3]
+                    if kind == 1:
+                        out[field] = raw.decode("utf-8", "replace").strip()
+                    elif kind in (23, 24) and len(raw) in (4, 8):
+                        out[field] = struct.unpack(">f" if len(raw) == 4 else ">d", raw)[0]
+                    elif kind in (21, 22) and 0 < len(raw) <= 8:
+                        out[field] = float(int.from_bytes(raw, "big", signed=kind == 21))
+    return out
+
+
+def read_lens_info(path: Path | str) -> LensInfo:
+    """The phone and lens a QuickTime/MP4 video was filmed with, from the movie's and its
+    tracks' `keys`/`ilst` metadata. Only `LENS_KEYS` are decoded. Empty when there is none
+    (Android phones, re-encoded files) or the file cannot be parsed."""
+    found: dict[str, str | float] = {}
+    try:
+        with Path(path).open("rb") as f:
+            size = f.seek(0, 2)
+            pos = 0
+            while pos + 8 <= size:
+                f.seek(pos)
+                head = f.read(16)
+                box, typ, head_len = int.from_bytes(head[:4], "big"), head[4:8], 8
+                if box == 1:
+                    box, head_len = int.from_bytes(head[8:16], "big"), 16
+                elif box == 0:
+                    box = size - pos
+                if box < head_len:
+                    break
+                if typ == b"moov":
+                    if box <= _MAX_MOOV_BYTES:
+                        f.seek(pos)
+                        moov = f.read(box)
+                        _collect_meta(moov, head_len, len(moov), found)
+                    break
+                pos += box  # mdat and the rest are skipped, not read
+    except (OSError, ValueError, IndexError, struct.error):
+        return LensInfo()
+
+    def text(key: str) -> str | None:
+        v = found.get(key)
+        return str(v) if v not in (None, "") else None
+
+    try:
+        focal = float(found["focal_length_35mm"]) if "focal_length_35mm" in found else None
+    except ValueError:
+        focal = None
+    return LensInfo(text("make"), text("model"), text("lens_model"), focal)
+
+
+def _collect_meta(buf: bytes, start: int, end: int, found: dict[str, str | float]) -> None:
+    """Whitelisted metadata of the movie (`moov/meta`, `moov/udta/meta`) and its tracks."""
+    for typ, s, e in _boxes(buf, start, end):
+        if typ == b"meta":
+            for k, v in _meta_items(buf, s, e).items():
+                found.setdefault(k, v)
+        elif typ in (b"trak", b"udta"):
+            _collect_meta(buf, s, e, found)
 
 
 def normalize(

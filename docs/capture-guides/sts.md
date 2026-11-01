@@ -6,6 +6,9 @@ knee, hip and trunk angles are visible
 **Camera**
 - Phone in landscape on a tripod, lens about 0.8 m above the floor. Portrait also works (it is
   rotated on ingest) but leaves less room for the chair and feet.
+- Phone level: not tilted up or down, not rotated (the camera app's level or a bubble level on the
+  tripod shows it). Use the main 1× lens; the 0.5× ultra-wide makes the person small in the frame
+  and exaggerates perspective.
 - About 3 m from the chair, perpendicular to the person's side (sagittal view). Either side is fine;
   the report says which side was analysed.
 - Whole body, both feet, and the chair seat in frame for the entire test. Nothing between the camera

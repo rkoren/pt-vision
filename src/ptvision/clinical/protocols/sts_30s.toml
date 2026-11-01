@@ -31,7 +31,8 @@ segment_signal_cutoff_hz = 3.0
 # A phone a few tens of degrees off the side view foreshortens the thigh and trunk. The shoulder
 # separation over the trunk length (the camera-view check's measure) says how far off, and the
 # keypoints are stretched back before the angles are computed (ptvision.kinematics.view).
-# Timing does not use it. "thigh_length" is the alternative estimator, "none" switches it off.
+# Timing does not use it. "none" switches it off. view_model = "perspective" also undoes the
+# tilt a camera above or below the body adds; it is off until it is checked on level phones.
 view_correction = "shoulders"
 
 [segmenter]

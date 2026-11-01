@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from ptvision.datasets.mocap_projection import ProjectedTrial
@@ -16,6 +17,16 @@ Side = Literal["left", "right"]
 
 # columns `reference_joint_angles` may return, in degrees, in our conventions
 JOINT_ANGLE_COLUMNS = ("knee_flexion", "hip_flexion", "trunk_lean")
+
+
+@dataclass(frozen=True)
+class CameraCalibration:
+    """A lab camera's pinhole model and its orientation in the lab (mocap) frame."""
+
+    K: np.ndarray  # 3x3 intrinsics, pixels
+    distortion: np.ndarray  # OpenCV k1 k2 p1 p2 k3
+    lab_to_camera: np.ndarray  # 3x3 rotation: lab axes -> camera axes (x right, y down, z forward)
+    image_size: tuple[int, int]  # (width, height) the intrinsics refer to
 
 
 @dataclass
@@ -48,3 +59,7 @@ class LabTrial(ABC):
     @abstractmethod
     def force_sts_events(self) -> ForceStsEvents | None:
         """Sit-to-stand events from the force plates, or None when forces are missing."""
+
+    def camera_calibration(self, camera: int) -> CameraCalibration | None:
+        """The camera's calibration, when the dataset ships one."""
+        return None

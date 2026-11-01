@@ -44,6 +44,8 @@ class CameraCapture(BaseModel):
     distance_m: float | None = None
     camera_height_m: float | None = None
     device_model: str | None = None
+    lens_model: str | None = None  # from the video's metadata (iPhones write it)
+    focal_length_35mm: float | None = None  # 35 mm-equivalent, from the same metadata
 
 
 class Capture(BaseModel):

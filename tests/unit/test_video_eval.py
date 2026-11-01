@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ptvision.datasets.lab_trial import LabTrial
+from ptvision.datasets.lab_trial import CameraCalibration, LabTrial
 from ptvision.datasets.markers import MarkerTrial
 from ptvision.datasets.mocap_projection import ProjectedTrial, project_trial
 from ptvision.datasets.opensim_io import read_mot, read_trc
@@ -226,6 +226,15 @@ class SyntheticLabTrial(LabTrial):
     def force_sts_events(self) -> ForceStsEvents | None:
         return ForceStsEvents("synthetic", 75 * 9.80665, [1.0, 2.6, 4.2, 5.8, 7.4])
 
+    def camera_calibration(self, camera: int) -> CameraCalibration | None:
+        # a level camera square to the side: lab x forward -> image right, z up -> image up
+        return CameraCalibration(
+            K=np.array([[800.0, 0.0, 427.0], [0.0, 800.0, 240.0], [0.0, 0.0, 1.0]]),
+            distortion=np.zeros(5),
+            lab_to_camera=np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]),
+            image_size=(854, 480),
+        )
+
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_evaluate_video_on_synthetic_trial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,10 +269,37 @@ def test_evaluate_video_on_synthetic_trial(tmp_path: Path, monkeypatch: pytest.M
     # the leg facing the camera is scored, and the other leg alongside it for comparison
     assert r.side == "right" and r.side_by_confidence in ("left", "right")
     assert r.metrics["hip_flexion_far_rmse"] is not None
-    from ptvision.datasets.video_eval_tables import camera_table, load_rows, side_table
+    # a calibrated camera square to the side: the perspective correction changes nothing
+    assert r.cos_theta_calibrated == pytest.approx(1.0) and r.pitch_deg_calibrated == 0.0
+    assert r.metrics["rect_calibrated_applied"] is True
+    assert r.metrics["rect_true_yaw_applied"] and r.metrics["rect_true_tilt_applied"]
+    assert r.metrics["knee_flexion_rect_calibrated_rmse"] == pytest.approx(
+        r.metrics["knee_flexion_synced_rmse"], abs=0.05
+    )
+    # the reported metrics, scored at the force-plate seat-offs
+    assert r.metrics["knee_flexion_at_seat_off_shipped_n"] == 5
+    assert r.metrics["knee_flexion_at_seat_off_shipped_rmse"] < 3.0
+    assert r.metrics["peak_trunk_lean_rising_synced_rmse"] is not None
+    assert '"by_view"' in summary
+    from ptvision.datasets.video_eval_tables import (
+        camera_table,
+        correction_table,
+        event_table,
+        geometry_table,
+        knee_steps_table,
+        load_rows,
+        offset_table,
+        side_table,
+    )
 
     rows = load_rows(out)
-    assert "| cam0 |" in camera_table(rows) and "| cam0 |" in side_table(rows)
+    for table in (camera_table, side_table, geometry_table, correction_table):
+        assert "| cam0 |" in table(rows), table.__name__
+    assert "lab calibration" in correction_table(rows)
+    assert "| knee flexion at seat off | as reported | 1 |" in event_table(rows, (0,))
+    assert "| + the lab's camera tilt | 1 |" in knee_steps_table(rows, (0,))
+    two = [rows[0], {**rows[0], "task": "STS2", "subject": "s2"}]  # the spread needs two trials
+    assert "| shoulder stretch (as reported) | 2 |" in offset_table(two, (0,))
 
 
 def test_evaluate_video_records_errors_per_trial(

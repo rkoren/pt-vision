@@ -31,7 +31,10 @@ SAMPLES: dict[str, Sample] = {
         name="sit_to_stand",
         file="sts_side.mp4",
         protocol="sts_5x",
-        description="Five-Times Sit-to-Stand, side view, phone on a tripod, 13 s, 720p at 30 fps.",
+        description=(
+            "Five-Times Sit-to-Stand, filmed at an oblique angle from in front and to one side, "
+            "phone on a tripod, 13 s, 720p at 30 fps."
+        ),
         height_m=1.80,
         age_years=26,
         sex="m",

@@ -116,3 +116,52 @@ def test_pull_keeps_verified_file_without_provenance_and_saves_per_file(
     assert dirs.provenance.exists(), "progress saved before the failure"
     res = R.pull(spec)
     assert res.skipped == ["a.bin"] and res.downloaded == ["b.bin"]
+
+
+def test_numpy_pickle_loads_arrays_and_refuses_anything_else(tmp_path) -> None:
+    import os
+    import pickle
+
+    from ptvision.datasets.opencap import load_numpy_pickle
+
+    good = tmp_path / "cal.pickle"
+    good.write_bytes(pickle.dumps({"K": np.eye(3), "size": np.array([[1280.0], [720.0]])}))
+    loaded = load_numpy_pickle(good)
+    assert np.array_equal(loaded["K"], np.eye(3))
+
+    class Sneaky:
+        def __reduce__(self):  # type: ignore[no-untyped-def]
+            return (os.getcwd, ())  # harmless if it ran; it must not run at all
+
+    bad = tmp_path / "bad.pickle"
+    bad.write_bytes(pickle.dumps({"K": Sneaky()}))
+    with pytest.raises(pickle.UnpicklingError, match="not allowed"):
+        load_numpy_pickle(bad)
+
+
+def test_opencap_camera_calibration(tmp_path) -> None:
+    import pickle
+
+    from ptvision.datasets.opencap import BOARD_FROM_VIDEO, OpenCapTrial
+
+    cam_dir = tmp_path / "VideoData" / "Session0" / "Cam0"
+    (cam_dir / "STS1").mkdir(parents=True)
+    video = cam_dir / "STS1" / "STS1_syncdWithMocap.avi"
+    video.touch()
+    rot = np.array([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+    cal = {
+        "intrinsicMat": np.array([[900.0, 0, 360], [0, 900.0, 640], [0, 0, 1]]),
+        "distortion": np.zeros((1, 5)),
+        "imageSize": np.array([[1280.0], [720.0]]),  # rows, cols
+        "rotation": rot,
+    }
+    (cam_dir / "cameraIntrinsicsExtrinsics.pickle").write_bytes(pickle.dumps(cal))
+    (cam_dir.parent / "mocapToVideoTransform.yaml").write_text(
+        "R_fromMocap_toVideo:\n- [0, 0, -1]\n- [1, 0, 0]\n- [0, -1, 0]\n"
+    )
+    trial = OpenCapTrial("opencap", "s", "STS1", {0: video}, {0: -70.0})
+    got = trial.camera_calibration(0)
+    assert got is not None and got.image_size == (720, 1280)
+    m2v = np.array([[0.0, 0, -1], [1, 0, 0], [0, -1, 0]])
+    assert np.allclose(got.lab_to_camera, rot @ BOARD_FROM_VIDEO @ m2v)
+    assert trial.camera_calibration(3) is None
