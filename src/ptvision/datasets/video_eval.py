@@ -3,7 +3,8 @@ marker mocap and force plates
 
 Per trial + camera):
   1. pose on the synced video (cached in a trial dir under derived/)
-  2. our angles -> RMSE, bias, limits of agreement, r, per-rep ROM error
+  2. our angles -> RMSE, bias, limits of agreement, r, per-rep ROM error, as filmed and after
+     each view correction; the reported angle metrics at the force-plate seat-offs
   3. our angles against the lab's model joint angles mapped to our conventions (secondary)
   4. our sit-to-stand events against the force-plate events -> seat-off timing error, rep count,
      first-to-last seat-off span
@@ -15,7 +16,7 @@ from __future__ import annotations
 import csv
 import json
 import time
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -29,6 +30,14 @@ from ptvision.datasets.sts_force import match_reps
 
 ANGLES: tuple[str, ...] = JOINT_ANGLE_COLUMNS
 SIDED: tuple[str, ...] = ("knee_flexion", "hip_flexion")  # angles that use one leg
+# view corrections scored per trial-camera (see step 2b of evaluate_trial_camera)
+CORRECTIONS: tuple[str, ...] = (
+    "rect_shoulders",
+    "rect_level",
+    "rect_true_yaw",
+    "rect_true_tilt",
+    "rect_calibrated",
+)
 DATASETS: tuple[str, ...] = ("opencap",)
 # Segment inclinations (degrees from vertical, forward positive) scored vs lab
 SEGMENTS: dict[str, tuple[str, str]] = {
@@ -154,6 +163,56 @@ def resample_to(t_src: np.ndarray, y: np.ndarray, t_dst: np.ndarray) -> np.ndarr
     return np.asarray(out, dtype=np.float64)
 
 
+def undistort(track: Any, k: np.ndarray, distortion: np.ndarray) -> Any:
+    """The track's keypoints with the lens distortion of a calibrated camera removed."""
+    import cv2
+
+    xy = track.coords.reshape(-1, 2).astype(np.float64)
+    ok = np.isfinite(xy).all(axis=1)
+    out = np.full_like(xy, np.nan)
+    if ok.any():
+        und = cv2.undistortPoints(xy[ok].reshape(-1, 1, 2), k, distortion, P=k)
+        out[ok] = und.reshape(-1, 2)
+    return replace(
+        track,
+        coords=out.reshape(track.coords.shape),
+        score=track.score.copy(),
+        stage=f"{track.stage}+undistorted",
+    )
+
+
+# the reported sit-to-stand angle metrics (clinical.metrics.sts), scored at the force-plate events
+EVENT_METRICS = ("knee_flexion_at_seat_off", "trunk_lean_at_seat_off", "peak_trunk_lean_rising")
+PEAK_WINDOW_S = 0.5  # peak trunk lean: largest value within this of each force seat-off
+
+
+def event_errors(
+    ours: Any, ref: Any, seat_off_s: list[float], fps: float, shift: int, tag: str
+) -> dict[str, Any]:
+    """Video − lab for the reported angle metrics at each force-plate seat-off (the video trace
+    lag-corrected by `shift` frames): the angles at seat-off and the peak trunk lean around it.
+    The same frames are used for both, so this is the angle error, not an event-timing error."""
+    n = min(len(ours.frame), len(ref.frame))
+    frames = [f for f in (round(t * fps) for t in seat_off_s) if 0 <= f < n]
+    half = round(PEAK_WINDOW_S * fps)
+    knee_v, knee_r = _shift(ours["knee_flexion"][:n], shift), ref["knee_flexion"][:n]
+    trunk_v, trunk_r = _shift(ours["trunk_lean"][:n], shift), ref["trunk_lean"][:n]
+    errs: dict[str, list[float]] = {m: [] for m in EVENT_METRICS}
+    for f in frames:
+        errs["knee_flexion_at_seat_off"].append(float(knee_v[f] - knee_r[f]))
+        errs["trunk_lean_at_seat_off"].append(float(trunk_v[f] - trunk_r[f]))
+        v, r = trunk_v[max(0, f - half) : f + half + 1], trunk_r[max(0, f - half) : f + half + 1]
+        if np.isfinite(v).any() and np.isfinite(r).any():
+            errs["peak_trunk_lean_rising"].append(float(np.nanmax(v) - np.nanmax(r)))
+    out: dict[str, Any] = {}
+    for metric, e in errs.items():
+        d = np.array([x for x in e if np.isfinite(x)], dtype=np.float64)
+        out[f"{metric}_{tag}_n"] = int(d.size)
+        out[f"{metric}_{tag}_bias"] = round(float(d.mean()), 3) if d.size else None
+        out[f"{metric}_{tag}_rmse"] = round(float(np.sqrt(np.mean(d**2))), 3) if d.size else None
+    return out
+
+
 # ---------------------------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------------------------
@@ -177,8 +236,11 @@ class TrialCameraResult:
     camera_view_status: str = ""
     camera_view_value: float | None = None
     cos_theta_nominal: float | None = None  # cos of the camera's nominal angle off the side
-    cos_theta_thigh: float | None = None  # kinematics.view estimates from the video itself
-    cos_theta_shoulders: float | None = None
+    cos_theta_shoulders: float | None = None  # kinematics.view estimate from the video itself
+    cos_theta_calibrated: float | None = None  # from the lab's camera calibration
+    pitch_deg_calibrated: float | None = None  # camera tilt below level, same source
+    front_shoulders: int = 0  # camera toward the person's front (+1) or back (-1), 0 unknown
+    front_calibrated: int = 0
     lag_knee_s: float | None = None
     window_s: tuple[float, float] | None = None  # angle statistics are taken inside it
     reps_video: int = 0
@@ -238,8 +300,12 @@ def evaluate_trial_camera(
     from ptvision.kinematics.angles import compute_angles, resolve_side
     from ptvision.kinematics.preprocess import PreprocessConfig, preprocess
     from ptvision.kinematics.view import (
+        MIN_COS_THETA,
+        ViewCorrection,
         estimate_view_shoulders,
-        estimate_view_thigh_length,
+        level_camera_axes,
+        plane_rotation,
+        rectify_perspective,
         rectify_sagittal,
     )
     from ptvision.pipeline import AnalyzeOptions, pose_only
@@ -332,19 +398,50 @@ def evaluate_trial_camera(
         frame[f"{name}_mocap"] = b
         res.metrics.update(Agreement.of(a[win], b[win]).flat(f"{name}_synced"))
 
-    # 2b. the same, after adjusting for height with off-side camera
+    # 2b. the same after each view correction: the protocol's shoulder stretch; the perspective
+    # model as shipped (shoulder yaw, camera taken as level; the lab's focal length stands in for
+    # the lens metadata these re-encoded videos lack); and the perspective model with the lab's
+    # calibration (undistorted keypoints, true camera orientation), which leaves only the
+    # keypoints' own error. In between, the lab's camera angle, then its tilt, are swapped in one
+    # at a time, which says what each input of the shipped model costs. [REVIEW]
     if np.isfinite(res.view_deg):
         res.cos_theta_nominal = round(float(np.cos(np.radians(90.0 - abs(res.view_deg)))), 3)
-    for tag, est in (
-        ("rect_thigh", estimate_view_thigh_length(pre.filtered, ours.side)),
-        ("rect_shoulders", estimate_view_shoulders(pre.filtered)),
-    ):
-        setattr(res, "cos_theta_" + tag.removeprefix("rect_"), round(est.cos_theta, 3))
-        res.metrics[f"{tag}_applied"] = est.applied
-        if not est.applied:
-            continue
-        rect = rectify_sagittal(pre.filtered, est.cos_theta)
+    est = estimate_view_shoulders(pre.filtered)
+    res.cos_theta_shoulders = round(est.cos_theta, 3)
+    res.front_shoulders = 0 if est.toward_front is None else 1 if est.toward_front else -1
+    variants: dict[str, Any] = {}
+    if est.applied:
+        variants["rect_shoulders"] = rectify_sagittal(pre.filtered, est.cos_theta)
+    cal = trial.camera_calibration(camera)
+    if cal is not None and cal.image_size == track.image_size:
+        focal, center = float(cal.K[0, 0]), (float(cal.K[0, 2]), float(cal.K[1, 2]))
+        lab = cal.lab_to_camera
+        rot = plane_rotation(lab[:, ref.lab.vertical], lab[:, ref.lab.lateral])
+        optical = rot[:, 2]  # the camera's optical axis in the virtual camera's axes
+        cos_cal = float(optical[2] / np.hypot(optical[0], optical[2]))
+        res.cos_theta_calibrated = round(cos_cal, 3)
+        res.pitch_deg_calibrated = round(float(np.degrees(np.arcsin(optical[1]))), 1)
+        toward = -float(lab[2, ref.lab.forward] * ref.lab.forward_sign)  # front toward camera
+        res.front_calibrated = 0 if abs(toward) < 0.02 else 1 if toward > 0 else -1
+        if est.applied:
+            level = ViewCorrection(est, "perspective", focal, center, ours.facing)
+            variants["rect_level"] = level.apply(pre.filtered)
+        if cos_cal >= MIN_COS_THETA:
+            yaw = res.front_calibrated * float(np.degrees(np.arccos(cos_cal)))
+            tilt = float(np.degrees(np.arcsin(optical[1])))
+            for tag, pitch in (("rect_true_yaw", 0.0), ("rect_true_tilt", tilt)):
+                axes = level_camera_axes(yaw, ours.facing, pitch)
+                variants[tag] = rectify_perspective(
+                    pre.filtered, plane_rotation(*axes), focal, center
+                )
+            und = undistort(pre.filtered, cal.K, cal.distortion)
+            variants["rect_calibrated"] = rectify_perspective(und, rot, focal, center)
+    for tag in CORRECTIONS:
+        res.metrics[f"{tag}_applied"] = tag in variants
+    shipped = ours  # what the protocol reports: the shoulder stretch where it applies
+    for tag, rect in variants.items():
         ours_r = compute_angles(rect, list(ANGLES), side=ours.side)
+        shipped = ours_r if tag == "rect_shoulders" else shipped
         for name in ANGLES:
             a = _shift(ours_r[name][:n], shift)
             frame[f"{name}_{tag}"] = ours_r[name][:n]
@@ -355,6 +452,13 @@ def evaluate_trial_camera(
         for name in SEGMENTS:
             a = _shift(seg_r[name][:n], shift)
             res.metrics.update(Agreement.of(a[win], seg_ref[name][:n][win]).flat(f"{name}_{tag}"))
+        if force is not None:
+            res.metrics.update(event_errors(ours_r, ref_angles, force.seat_off_s, fps, shift, tag))
+    if force is not None:
+        res.metrics.update(event_errors(ours, ref_angles, force.seat_off_s, fps, shift, "synced"))
+        res.metrics.update(
+            event_errors(shipped, ref_angles, force.seat_off_s, fps, shift, "shipped")
+        )
 
     # 3. the lab's own model coordinates, mapped to our conventions
     model = trial.reference_joint_angles(ours.side)
@@ -613,7 +717,7 @@ def _group_summary(rs: list[TrialCameraResult]) -> dict[str, Any]:
     ok = [r for r in rs if r.status == "ok"]
     out: dict[str, Any] = {"trials": len(rs), "ok": len(ok), "errors": len(rs) - len(ok)}
     for name in ANGLES:
-        for ref in ("mocap", "synced", "far", "model", "rect_thigh", "rect_shoulders"):
+        for ref in ("mocap", "synced", "far", "model", *CORRECTIONS):
             if ref == "far" and name not in SIDED:
                 continue
             for stat in ("rmse", "bias", "r", "slope"):
@@ -633,8 +737,17 @@ def _group_summary(rs: list[TrialCameraResult]) -> dict[str, Any]:
     out["seat_off_err_synced_ms_mean"] = _agg([r.seat_off_err_synced_ms_mean for r in ok])
     out["span_err_s"] = _agg([r.span_err_s for r in ok])
     out["lag_knee_s"] = _agg([r.lag_knee_s for r in ok])
-    for key in ("cos_theta_nominal", "cos_theta_thigh", "cos_theta_shoulders"):
+    for key in ("cos_theta_nominal", "cos_theta_shoulders", "cos_theta_calibrated"):
         out[key] = _agg([getattr(r, key) for r in ok])
+    out["pitch_deg_calibrated"] = _agg([r.pitch_deg_calibrated for r in ok])
+    known = [r for r in ok if r.front_shoulders and r.front_calibrated]
+    out["front_agrees"] = sum(1 for r in known if r.front_shoulders == r.front_calibrated)
+    out["front_compared"] = len(known)
+    for metric in EVENT_METRICS:
+        for tag in ("synced", "shipped", *CORRECTIONS):
+            for stat in ("rmse", "bias"):
+                key = f"{metric}_{tag}_{stat}"
+                out[key] = _agg([r.metrics.get(key) for r in ok])
     out["rep_count_agrees"] = sum(
         1 for r in ok if r.reps_force is not None and r.reps_video == r.reps_force
     )
@@ -658,6 +771,10 @@ def summarize(
         s: _group_summary([r for r in results if r.subject == s])
         for s in sorted({r.subject for r in results})
     }
+    views = sorted({abs(r.view_deg) for r in results if np.isfinite(r.view_deg)}, reverse=True)
+    by_view = {
+        f"{v:g}": _group_summary([r for r in results if abs(r.view_deg) == v]) for v in views
+    }
     info = getattr(backend, "info", None)
     dump = getattr(info, "model_dump", None)
     if callable(dump):
@@ -673,5 +790,6 @@ def summarize(
         "held_out": "no pipeline parameter was tuned on this dataset",
         "all": _group_summary(results),
         "by_camera": by_cam,
+        "by_view": by_view,  # cameras grouped by their nominal angle from frontal
         "by_subject": by_subject,
     }

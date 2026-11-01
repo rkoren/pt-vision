@@ -53,7 +53,11 @@ class PreprocessSpec(BaseModel):
 class KinematicsSpec(BaseModel):
     # How the camera's angle off the side view is estimated and undone before angles are
     # computed (see ptvision.kinematics.view). "none" leaves the keypoints as filmed.
-    view_correction: Literal["thigh_length", "shoulders", "none"] = "none"
+    view_correction: Literal["shoulders", "none"] = "none"
+    # The camera model that undoes it: "orthographic" stretches the keypoints horizontally;
+    # "perspective" re-projects them onto a level camera square to the side, using the lens's
+    # focal length from the video's metadata, and stretches instead when that is missing.
+    view_model: Literal["orthographic", "perspective"] = "orthographic"
 
 
 class SegmenterSpec(BaseModel):

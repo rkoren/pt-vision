@@ -34,8 +34,8 @@ class DropPage(QWidget):
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint = QLabel(
             "<h2>Drop a video here</h2>"
-            "<p>a phone clip of a sit-to-stand test or walking, or a folder from a previous "
-            "run. No video yet? Try the sample clip below.<br>"
+            "<p>a phone clip of a sit-to-stand test, or a folder from a previous run. No video "
+            "yet? Try the sample clip below.<br>"
             "The video is processed on this computer and never uploaded.</p>"
         )
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -53,7 +53,8 @@ class DropPage(QWidget):
         self.open_trial = QPushButton("Open trial…")
         self.try_sample = QPushButton("Try the sample clip")
         self.try_sample.setToolTip(
-            "A bundled 13-second side-view sit-to-stand recording; processes in about 15 s"
+            "A bundled 13-second sit-to-stand recording, filmed at an oblique angle; "
+            "processes in about 15 s"
         )
         row.addWidget(self.open_video)
         row.addWidget(self.open_trial)

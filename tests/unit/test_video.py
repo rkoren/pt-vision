@@ -150,3 +150,67 @@ def test_frame_source_random_access_matches_sequential(tmp_path) -> None:
         assert fs.seeks == seeks
         with pytest.raises(IndexError):
             fs.read(len(sequential))
+
+
+def _box(typ: bytes, payload: bytes) -> bytes:
+    return (8 + len(payload)).to_bytes(4, "big") + typ + payload
+
+
+def _meta(items: dict[str, bytes]) -> bytes:
+    """A QuickTime `meta` box: hdlr, keys, and an ilst of UTF-8 `data` entries."""
+    hdlr = _box(b"hdlr", bytes(8) + b"mdta" + bytes(13))
+    keys = b"".join(_box(b"mdta", k.encode()) for k in items)
+    keys = _box(b"keys", bytes(4) + len(items).to_bytes(4, "big") + keys)
+    entries = b"".join(
+        _box(i.to_bytes(4, "big"), _box(b"data", (1).to_bytes(4, "big") + bytes(4) + v))
+        for i, v in enumerate(items.values(), start=1)
+    )
+    return _box(b"meta", hdlr + keys + _box(b"ilst", entries))
+
+
+def test_read_lens_info_reads_whitelisted_keys_only(tmp_path) -> None:
+    from ptvision.video import LensInfo, read_lens_info
+
+    movie = _meta({"com.apple.quicktime.make": b"Apple", "com.apple.quicktime.model": b"iPhone"})
+    track = _meta(
+        {
+            "com.apple.quicktime.location.ISO6709": b"+40.0000-075.0000/",
+            "com.apple.quicktime.camera.lens_model": b"iPhone back camera 6.765mm f/1.78",
+            "com.apple.quicktime.camera.focal_length.35mm_equivalent": b"24",
+        }
+    )
+    # a 64-bit-size mdat before the moov, as long recordings have; it must be skipped, not read
+    mdat = (1).to_bytes(4, "big") + b"mdat" + (16 + 1000).to_bytes(8, "big") + bytes(1000)
+    path = tmp_path / "phone.mov"
+    path.write_bytes(
+        _box(b"ftyp", b"qt  " + bytes(4)) + mdat + _box(b"moov", movie + _box(b"trak", track))
+    )
+    info = read_lens_info(path)
+    assert info == LensInfo("Apple", "iPhone", "iPhone back camera 6.765mm f/1.78", 24.0)
+    assert "40.0000" not in repr(info)
+    (tmp_path / "junk.mov").write_bytes(b"not a movie at all")
+    assert read_lens_info(tmp_path / "junk.mov") == LensInfo()
+
+
+@pytest.mark.ffmpeg
+def test_ingest_keeps_the_lens_metadata(tmp_path) -> None:
+    from ptvision.pipeline import ingest
+    from ptvision.trials.store import TrialDir
+
+    clip = tmp_path / "IMG_0001.mov"
+    tags = {
+        "com.apple.quicktime.model": "iPhone Test",
+        "com.apple.quicktime.camera.lens_model": "Test back camera 6.765mm f/1.78",
+        "com.apple.quicktime.camera.focal_length.35mm_equivalent": "24",
+        "com.apple.quicktime.location.ISO6709": "+40.0000-075.0000/",
+    }
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=gray:s=320x240:d=1:r=30"]
+    for k, v in tags.items():
+        cmd += ["-metadata", f"{k}={v}"]
+    subprocess.run(
+        [*cmd, "-c:v", "libx264", "-movflags", "use_metadata_tags", str(clip)], check=True
+    )
+    cam = ingest(clip, TrialDir(tmp_path / "trial")).cameras[0]
+    assert (cam.device_model, cam.focal_length_35mm) == ("iPhone Test", 24.0)
+    assert cam.lens_model == "Test back camera 6.765mm f/1.78"
+    assert "40.0000" not in (tmp_path / "trial" / "capture.json").read_text()

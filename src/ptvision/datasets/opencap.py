@@ -7,6 +7,8 @@ Layout under `raw/subject<N>/`:
   OpenSimData/Mocap/IK/<trial>.mot                                   (100 Hz, degrees)
   ForceData/<trial>_forces.mot                                       (2 kHz; plates R_, L_, 3_)
   sessionMetadata.yaml                                               (height_m, mass_kg, sex)
+  VideoData/Session<k>/Cam<c>/cameraIntrinsicsExtrinsics.pickle      (pinhole model, board pose)
+  VideoData/Session<k>/mocapToVideoTransform.yaml                    (mocap axes -> video axes)
 
 Cameras stand on an arc in front of the subject (checked on frame grabs of subject2 STS1 and
 on the extrinsics): Cam2 faces the subject, Cam1/Cam3 sit about 45 degrees to either side,
@@ -19,6 +21,7 @@ subject2 STS1 (see notebooks/validation.ipynb), not against our video output.
 
 from __future__ import annotations
 
+import pickle
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -28,7 +31,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ptvision.datasets.lab_trial import JOINT_ANGLE_COLUMNS, LabTrial, Side
+from ptvision.datasets.lab_trial import JOINT_ANGLE_COLUMNS, CameraCalibration, LabTrial, Side
 from ptvision.datasets.mocap_projection import ProjectedTrial, project_trial
 from ptvision.datasets.opensim_io import read_mot, read_trc
 from ptvision.datasets.registry import DatasetDirs, load_manifest
@@ -46,6 +49,11 @@ CAMERAS: tuple[int, ...] = (0, 1, 2, 3, 4)
 # based on subject's facing direction (0 = frontal, ±90 = side)
 CAMERA_VIEW_DEG: dict[int, float] = {0: -70.0, 1: -45.0, 2: 0.0, 3: 45.0, 4: 70.0}
 SUBJECT_RE = re.compile(r"^subject(\d+)$")
+# The extrinsics place the checkerboard (y down the board) in each camera; the yaml rotates mocap
+# axes into OpenCap's video frame (y up). G swaps the two. Checked 2026-10-29 on every camera of
+# every subject: with it the lab vertical is image-up within 6° and the side cameras sit 21-33° off
+# the side, without it every camera reads as lying on its side.
+BOARD_FROM_VIDEO = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
 
 
 def root() -> Path:
@@ -99,6 +107,30 @@ class OpenCapTrial(LabTrial):
         # torso angle from vertical: pelvis tilt plus lumbar extension, forward positive
         out["trunk_lean"] = -(df["pelvis_tilt"] + df["lumbar_extension"]).to_numpy(dtype=np.float64)
         return out[["time", *JOINT_ANGLE_COLUMNS]]
+
+    # [REVIEW] camera calibration loader (orientation chain checked on every camera, see G above)
+    def camera_calibration(self, camera: int) -> CameraCalibration | None:
+        video = self.videos.get(camera)
+        if video is None:
+            return None
+        cam_dir = video.parent.parent
+        pkl = cam_dir / "cameraIntrinsicsExtrinsics.pickle"
+        transform = cam_dir.parent / "mocapToVideoTransform.yaml"
+        if not pkl.exists() or not transform.exists():
+            return None
+        import yaml
+
+        cal = load_numpy_pickle(pkl)
+        mocap_to_video = np.asarray(
+            yaml.safe_load(transform.read_text(encoding="utf-8"))["R_fromMocap_toVideo"], float
+        )
+        rows, cols = (int(v) for v in np.asarray(cal["imageSize"]).ravel())
+        return CameraCalibration(
+            K=np.asarray(cal["intrinsicMat"], dtype=np.float64),
+            distortion=np.asarray(cal["distortion"], dtype=np.float64).ravel(),
+            lab_to_camera=np.asarray(cal["rotation"], float) @ BOARD_FROM_VIDEO @ mocap_to_video,
+            image_size=(cols, rows),
+        )
 
     def force_sts_events(self) -> ForceStsEvents | None:
         if self.forces is None or not self.forces.exists() or not self.mass_kg:
@@ -159,6 +191,35 @@ def trials(
                 )
             )
     return out
+
+
+# [REVIEW] restricted unpickler for the downloaded calibration files
+_NUMPY_GLOBALS = frozenset(
+    {
+        ("numpy.core.multiarray", "_reconstruct"),
+        ("numpy._core.multiarray", "_reconstruct"),
+        ("numpy.core.multiarray", "scalar"),
+        ("numpy._core.multiarray", "scalar"),
+        ("numpy", "ndarray"),
+        ("numpy", "dtype"),
+    }
+)
+
+
+class _NumpyOnlyUnpickler(pickle.Unpickler):
+    """Rebuilds numpy arrays and refuses every other global: the calibration files are pickles
+    from a download, and loading a pickle can run any code it names."""
+
+    def find_class(self, module: str, name: str) -> Any:
+        if (module, name) in _NUMPY_GLOBALS:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(f"{module}.{name} is not allowed in a calibration file")
+
+
+def load_numpy_pickle(path: Path) -> Any:
+    """Load a pickle that may hold only numpy arrays (and containers of them)."""
+    with path.open("rb") as f:
+        return _NumpyOnlyUnpickler(f, encoding="latin1").load()
 
 
 def _float_or_none(v: Any) -> float | None:

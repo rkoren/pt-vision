@@ -28,7 +28,7 @@ from ptvision.trials.store import (
     new_id,
     now_iso,
 )
-from ptvision.video import iter_frames, normalize, probe
+from ptvision.video import iter_frames, normalize, probe, read_lens_info
 from ptvision.viz import status as vs
 
 StageHook = Callable[[str], None]
@@ -66,6 +66,7 @@ def ingest(
             )
         return trial.read_capture()
     src_info = probe(source)
+    lens = read_lens_info(source)
     src_sha = sha256_file(source)
     if opts.copy_source:
         trial.source_dir.mkdir(parents=True, exist_ok=True)
@@ -98,6 +99,9 @@ def ingest(
         n_frames=norm_info.n_frames,
         duration_s=norm_info.duration_s,
         view=opts.view,
+        device_model=lens.model,
+        lens_model=lens.lens_model,
+        focal_length_35mm=lens.focal_length_35mm,
     )
     capture = Capture(
         trial_id=trial.trial_id or new_id("T"),
@@ -466,7 +470,7 @@ def analyze(
     from ptvision.kinematics.angles import ANGLE_DEFS, compute_angles, resolve_side
     from ptvision.kinematics.export import write_mot, write_trc
     from ptvision.kinematics.preprocess import PreprocessConfig, preprocess
-    from ptvision.kinematics.view import estimate_view, rectify_sagittal
+    from ptvision.kinematics.view import focal_px_from_35mm, view_correction
     from ptvision.pose.overlay import thumbnail
     from ptvision.quality import checks as Q
     from ptvision.report.bundle import Figure, ReportBundle, build_report
@@ -568,14 +572,23 @@ def analyze(
         dict.fromkeys([*protocol.report.angles, "trunk_lean", "knee_flexion", "hip_flexion"])
     )
     angle_names = [a for a in angle_names if a in ANGLE_DEFS]
-    # camera off the side axis: undo the horizontal foreshortening before measuring angles
+    # camera off the side axis: undo the foreshortening before measuring angles
     side = resolve_side(pre.filtered, "near")
-    view = estimate_view(pre.filtered, protocol.kinematics.view_correction, side)
-    prov.preprocess["view_correction"] = view.to_dict()
-    filtered_for_angles = (
-        rectify_sagittal(pre.filtered, view.cos_theta) if view.applied else pre.filtered
+    focal = (
+        focal_px_from_35mm(cam.focal_length_35mm, cam.width, cam.height)
+        if cam.focal_length_35mm
+        else None
     )
-    raw_for_angles = rectify_sagittal(pre.raw, view.cos_theta) if view.applied else pre.raw
+    view = view_correction(
+        pre.filtered,
+        protocol.kinematics.view_correction,
+        protocol.kinematics.view_model,
+        focal_px=focal,
+        center=(cam.width / 2, cam.height / 2),
+    )
+    prov.preprocess["view_correction"] = view.to_dict()
+    filtered_for_angles = view.apply(pre.filtered)
+    raw_for_angles = view.apply(pre.raw)
     angles = compute_angles(filtered_for_angles, angle_names, side=side)
     angles_raw = compute_angles(raw_for_angles, angle_names, side=side)
 
@@ -765,16 +778,24 @@ def analyze(
         ),
         (
             f"Angles computed on the {angles.side} side (the side facing the camera). Tier 1 = "
-            "timing/count (validated ICC > 0.9 vs clinicians); tier 2 = sagittal angles (knee "
-            "about 8° RMSE against lab motion capture from a camera 20° off the side); ankle "
-            "and frontal-plane measures are not reported."
+            "timing/count (markerless timing agrees with clinicians at ICC > 0.9 in Bertrand et "
+            "al. 2026; this tool's is checked against force plates); tier 2 = sagittal angles, "
+            "each with its error against lab motion capture from phones 20-30° off the side; "
+            "ankle and frontal-plane measures are not reported."
         ),
     ]
     if view.applied:
+        est = view.estimate
+        how = (
+            f"re-projected onto a level camera square to the side (pinhole model, focal length "
+            f"{view.focal_px:.0f} px from the lens metadata, camera taken as level)"
+            if view.model == "perspective" and view.focal_px
+            else f"stretched horizontally about the pelvis by 1/{est.cos_theta:.2f}"
+        )
         methods.append(
-            f"View correction ({view.method}): the camera was estimated {view.theta_deg:.0f}° off "
-            f"the side view; keypoints were stretched horizontally about the pelvis by "
-            f"1/{view.cos_theta:.2f} before the angles were computed. Timing is unaffected."
+            f"View correction ({est.method}): the camera was estimated {est.theta_deg:.0f}° off "
+            f"the side view; keypoints were {how} before the angles were computed. Timing is "
+            "unaffected."
         )
     bundle = ReportBundle(
         title=protocol.protocol.name,

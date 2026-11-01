@@ -453,7 +453,7 @@ def demo(
         bool, typer.Option("--pose-only", help="Skeleton and confidence colours only, no protocol.")
     ] = False,
 ) -> None:
-    """Open the viewer on the bundled sample clip (a side-view sit-to-stand)"""
+    """Open the viewer on the bundled sample clip (a sit-to-stand filmed at an oblique angle)"""
     from ptvision.samples import sample
     from ptvision.trials.models import Subject
 
