@@ -1,0 +1,47 @@
+name: PTVision
+options:
+  bundleIdPrefix: com.piramsingh
+  deploymentTarget:
+    iOS: "27.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: YES
+packages:
+  onnxruntime:
+    url: https://github.com/microsoft/onnxruntime-swift-package-manager
+    from: 1.20.0
+targets:
+  PTVision:
+    type: application
+    platform: iOS
+    sources: [PTVision]
+    dependencies:
+      - package: onnxruntime
+        product: onnxruntime
+    info:
+      path: PTVision/Info.plist
+      properties:
+        CFBundleDisplayName: ptvision
+        NSMotionUsageDescription: ptvision uses motion to check the phone is level and steady while filming.
+        NSCameraUsageDescription: ptvision films the movement test so it can measure it. The video stays on this iPhone.
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.piramsingh.ptvision
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+schemes:
+  PTVision:
+    build:
+      targets: {PTVision: all}

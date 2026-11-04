@@ -25,6 +25,9 @@ which remains in force and is not affected by that dedication:
 
 - pyqtgraph (https://www.pyqtgraph.org/), MIT License, used for the desktop app's timeline plot.
 
+- ONNX Runtime (https://github.com/microsoft/onnxruntime-swift-package-manager), MIT License,
+  Copyright (c) Microsoft Corporation, used through Swift Package Manager by the iOS prototype in ios/.
+
 Model weights and their training data
 
 - The RTMPose Halpe-26 weights were trained on the Halpe dataset (26 keypoints incl. feet), which
