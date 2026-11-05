@@ -29,7 +29,7 @@ targets:
       properties:
         CFBundleDisplayName: ptvision
         NSMotionUsageDescription: ptvision uses motion to check the phone is level and steady while filming.
-        NSCameraUsageDescription: ptvision films the movement test so it can measure it. The video stays on this iPhone.
+        NSCameraUsageDescription: ptvision films the movement test so it can be measured. The video goes only to the computer you send it to.
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true

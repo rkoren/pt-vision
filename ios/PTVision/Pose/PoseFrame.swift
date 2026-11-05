@@ -40,19 +40,37 @@ struct PoseFrame: Sendable {
 
     enum Side: String, Sendable { case left, right }
 
+    /// The leg nearer the camera: the right leg of a person facing image-right, the left leg of one
+    /// facing image-left. The leg with the higher keypoint confidence only when the facing is
+    /// unknown; on oblique views that is usually the far leg.
     var side: Side {
+        if facingVote > 0 { return .right }
+        if facingVote < 0 { return .left }
         let l = (scores[Halpe26.lHip] + scores[Halpe26.lKnee] + scores[Halpe26.lAnkle]) / 3
         let r = (scores[Halpe26.rHip] + scores[Halpe26.rKnee] + scores[Halpe26.rAnkle]) / 3
         return l >= r ? .left : .right
     }
 
-    /// +1 facing image-right, -1 facing image-left: toe ahead of heel, else nose ahead of neck.
-    var facing: CGFloat {
-        let (toe, heel) = side == .left ? (Halpe26.lBigToe, Halpe26.lHeel) : (Halpe26.rBigToe, Halpe26.rHeel)
-        if ok(toe), ok(heel) { return p(toe).x >= p(heel).x ? 1 : -1 }
-        if ok(Halpe26.nose), ok(Halpe26.neck) { return p(Halpe26.nose).x >= p(Halpe26.neck).x ? 1 : -1 }
-        return 1
+    /// +1 facing image-right, -1 facing image-left, 0 if neither the feet nor the face show it:
+    /// toe ahead of heel on both feet, else the nose ahead of both ears.
+    var facingVote: Int {
+        var votes: [CGFloat] = []
+        for (toe, heel) in [(Halpe26.lBigToe, Halpe26.lHeel), (Halpe26.rBigToe, Halpe26.rHeel)] where ok(toe) && ok(heel) {
+            votes.append(p(toe).x - p(heel).x)
+        }
+        if votes.isEmpty {
+            for ear in [Halpe26.lEar, Halpe26.rEar] where ok(Halpe26.nose) && ok(ear) {
+                votes.append(p(Halpe26.nose).x - p(ear).x)
+            }
+        }
+        guard !votes.isEmpty else { return 0 }
+        let s = votes.sorted(), m = s.count / 2
+        let median = s.count % 2 == 1 ? s[m] : (s[m - 1] + s[m]) / 2
+        return median >= 0 ? 1 : -1
     }
+
+    /// The facing as a sign for the trunk lean, image-right when unknown.
+    var facing: CGFloat { facingVote < 0 ? -1 : 1 }
 
     // MARK: angles (degrees)
 
@@ -114,6 +132,29 @@ struct PoseFrame: Sendable {
 
     var meanRequiredScore: Float {
         Halpe26.required.map { scores[$0] }.reduce(0, +) / Float(Halpe26.required.count)
+    }
+}
+
+/// The phone's tilt from upright portrait, from gravity in the device's axes (x right, y up, z out
+/// of the screen). Roll turns the picture, which adds to the trunk lean degree for degree; pitch
+/// tips the camera down or up, which the angles take as level.
+struct PhoneTilt: Sendable, Equatable {
+    var rollDegrees: Double
+    var pitchDownDegrees: Double
+
+    init(gravityX x: Double, y: Double, z: Double) {
+        rollDegrees = atan2(x, -y) * 180 / .pi
+        pitchDownDegrees = asin(max(-1, min(1, -z))) * 180 / .pi
+    }
+
+    var worstDegrees: Double { max(abs(rollDegrees), abs(pitchDownDegrees)) }
+
+    var fix: String {
+        if abs(pitchDownDegrees) >= abs(rollDegrees) {
+            let way = pitchDownDegrees > 0 ? "down" : "up"
+            return "Tipped \(Int(abs(pitchDownDegrees).rounded()))° \(way) · aim it level at their side"
+        }
+        return "Rotated \(Int(abs(rollDegrees).rounded()))° · straighten the phone"
     }
 }
 

@@ -134,10 +134,12 @@ enum SampleTrial {
 
     static let metrics: [Metric] = [
         .init(label: "Repetitions", detail: "Full stands found", value: "5", error: "", validated: true),
-        .init(label: "Rise time", detail: "Seat-off to standing", value: "0.65 s", error: "± 0.04", validated: true),
-        .init(label: "Sit time", detail: "Start of descent to seated", value: "0.72 s", error: "± 0.03", validated: true),
-        .init(label: "Cycle time", detail: "Seat-off to next seat-off", value: "2.43 s", error: "± 0.12", validated: true),
-        .init(label: "Trunk lean at seat-off", detail: "Forward from vertical", value: "12°", error: "± 4°", validated: false),
+        // tier 2 in clinical/metrics/sts.py: the timings' spread is the SD over reps, not an error;
+        // the trunk lean's error is its RMSE against lab motion capture (ANGLE_RMSE_DEG)
+        .init(label: "Rise time", detail: "Seat-off to standing", value: "0.65 s", error: "SD 0.04", validated: false),
+        .init(label: "Sit time", detail: "Start of descent to seated", value: "0.72 s", error: "SD 0.03", validated: false),
+        .init(label: "Cycle time", detail: "Seat-off to next seat-off", value: "2.43 s", error: "SD 0.12", validated: false),
+        .init(label: "Trunk lean at seat-off", detail: "Forward from vertical", value: "12°", error: "RMSE 2.6°", validated: false),
     ]
 
     // MARK: synthetic kinematics

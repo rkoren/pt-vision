@@ -35,6 +35,7 @@ struct ReportDocument: View {
     var body: some View {
         let band = SampleTrial.reference(for: patient.age)
         VStack(alignment: .leading, spacing: 22) {
+            SampleDataBanner()
             VStack(alignment: .leading, spacing: 4) {
                 Text("MEASUREMENT REPORT").font(.caption.weight(.semibold)).tracking(0.6).foregroundStyle(Color.accentInk)
                 Text(test.name).font(.title2.bold()).tracking(-0.4)
@@ -91,7 +92,7 @@ struct ReportDocument: View {
                         Text(m.label)
                         Spacer()
                         Text(m.value).fontWeight(.semibold).monospacedDigit()
-                        Text(m.error).foregroundStyle(.secondary).frame(width: 50, alignment: .leading)
+                        Text(m.error).foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
                         Text(m.validated ? "Validated" : "Estimate").font(.caption).foregroundStyle(.secondary).frame(width: 60, alignment: .trailing)
                     }
                     .font(.footnote)

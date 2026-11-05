@@ -23,7 +23,7 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>ptvision films the movement test so it can measure it. The video stays on this iPhone.</string>
+	<string>ptvision films the movement test so it can be measured. The video goes only to the computer you send it to.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>ptvision uses motion to check the phone is level and steady while filming.</string>
 	<key>UIApplicationSceneManifest</key>

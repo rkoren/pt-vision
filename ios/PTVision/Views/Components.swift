@@ -106,6 +106,23 @@ struct SectionHeader: View {
     }
 }
 
+/// On the screens that still show the bundled sample, whatever was filmed.
+struct SampleDataBanner: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.statusAmber)
+            Text("**Sample data, not this recording.** The measurement comes from the laptop.")
+                .font(.footnote)
+                .foregroundStyle(.primary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.statusAmber.opacity(0.14), in: .rect(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct ValidatedTag: View {
     let validated: Bool
     var body: some View {

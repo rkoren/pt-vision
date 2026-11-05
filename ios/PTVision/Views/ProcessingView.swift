@@ -47,7 +47,7 @@ struct ProcessingView: View {
                 }
                 .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
 
-                Text("Analysed on this iPhone. You can lock the phone; it will notify you when the result is ready.")
+                Text("Simulated: the measurement runs on the laptop the video is sent to.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
