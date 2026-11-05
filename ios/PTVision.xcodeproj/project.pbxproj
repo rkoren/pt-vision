@@ -420,8 +420,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/microsoft/onnxruntime-swift-package-manager";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.20.0;
+				kind = exactVersion;
+				version = 1.20.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

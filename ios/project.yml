@@ -15,7 +15,8 @@ settings:
 packages:
   onnxruntime:
     url: https://github.com/microsoft/onnxruntime-swift-package-manager
-    from: 1.20.0
+    # memory leak fix
+    exactVersion: 1.20.0
 targets:
   PTVision:
     type: application
