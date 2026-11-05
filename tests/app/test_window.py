@@ -290,12 +290,12 @@ def test_recent_trials_list_remembers_opened_trial(qtbot, synthetic_trial, monke
     qtbot.addWidget(w)
     w.show()
     w.open_trial(synthetic_trial.trial_dir)
-    assert w.drop_page.recent_paths()[0] == synthetic_trial.trial_dir
+    assert w.drop_page.recent_paths()[0] == synthetic_trial.trial_dir.resolve()
     w2 = MainWindow()  # a new window sees it (same isolated settings store)
     qtbot.addWidget(w2)
     w2.show()
     assert w2.drop_page.recent.count() >= 1  # the settings store is shared across tests
-    assert w2.drop_page.recent_paths()[0] == synthetic_trial.trial_dir
+    assert w2.drop_page.recent_paths()[0] == synthetic_trial.trial_dir.resolve()
     w2.drop_page.recent.itemActivated.emit(w2.drop_page.recent.item(0))
     assert w2.stack.currentWidget() is w2.viewer
 

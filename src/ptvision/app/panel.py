@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QRadioButton,
     QScrollArea,
     QSizePolicy,
@@ -80,6 +81,10 @@ class SidePanel(QWidget):
         self.title.setStyleSheet("font-weight: 600; font-size: 14px;")
         self.title.setWordWrap(True)
         lay.addWidget(self.title)
+        self.report_button = QPushButton("Open report")
+        self.report_button.setToolTip("The printable report for this run, in the browser (⌘R)")
+        self.report_button.hide()
+        lay.addWidget(self.report_button, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.quality = QLabel("")
         self.quality.setWordWrap(True)

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
+    QDesktopServices,
     QDragEnterEvent,
     QDropEvent,
     QKeyEvent,
@@ -21,7 +23,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
@@ -48,6 +49,16 @@ def _is_trial_dir(p: Path) -> bool:
     return p.is_dir() and (p / "capture.json").exists()
 
 
+def friendly_failure(message: str) -> tuple[str, str]:
+    """A title and a next step for a failed job, in words for whoever is at the laptop."""
+    if "no person detected" in message.lower():
+        return (
+            "No one was found in the video",
+            "Film again with the whole body, both feet and the chair in view.",
+        )
+    return "The video could not be processed", message
+
+
 class MainWindow(QMainWindow):
     def __init__(self, *, backend_factory: BackendFactory | None = None) -> None:
         super().__init__()
@@ -59,7 +70,8 @@ class MainWindow(QMainWindow):
         self._session: TrialSession | None = None
         self._player: Player | None = None
         self._job_out: Path | None = None
-        self.screenshot_mode = False  # headless capture: never block on modal dialogs
+        self._job_source: Path | None = None
+        self.screenshot_mode = False  # headless capture
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -101,6 +113,7 @@ class MainWindow(QMainWindow):
         self.panel.angleToggled.connect(self._angle_toggled)
         self.panel.showOthersToggled.connect(self.view.skeleton.set_show_others)
         self.panel.smoothToggled.connect(self.view.skeleton.set_smooth)
+        self.panel.report_button.clicked.connect(self.open_report)
 
         self._build_actions()
         self.statusBar().showMessage("drop a video to begin")
@@ -168,7 +181,22 @@ class MainWindow(QMainWindow):
         act_close = QAction("Close trial", self)
         act_close.setShortcut(QKeySequence("Ctrl+W"))
         act_close.triggered.connect(self.close_trial)
+        self.act_report = QAction("Open report", self)
+        self.act_report.setShortcut(QKeySequence("Ctrl+R"))
+        self.act_report.triggered.connect(self.open_report)
+        self.act_report.setEnabled(False)
         file_menu.addActions([act_open, act_trial, act_close])
+        file_menu.addSeparator()
+        file_menu.addAction(self.act_report)
+
+        # "Window", not "View": macOS adds its own Enter Full Screen item to a menu titled View
+        window_menu = self.menuBar().addMenu("&Window")
+        self.act_fullscreen = QAction("Full screen", self)
+        self.act_fullscreen.setShortcuts(
+            [*QKeySequence.keyBindings(QKeySequence.StandardKey.FullScreen), QKeySequence("F11")]
+        )
+        self.act_fullscreen.triggered.connect(self.toggle_full_screen)
+        window_menu.addAction(self.act_fullscreen)
 
         pb = self.menuBar().addMenu("&Playback")
 
@@ -210,9 +238,19 @@ class MainWindow(QMainWindow):
             if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES:
                 self.open_path(p, protocol=protocol)
                 return
-        QMessageBox.warning(
-            self, "ptvision", "Drop a video file or a trial folder (with capture.json)."
+        self.notify(
+            "That isn't a video",
+            "Drop a video file (.mov, .mp4) or a folder from a previous run.",
+            level="warn",
         )
+
+    def notify(self, title: str, body: str = "", *, details: str = "", level: str = "fail") -> None:
+        """Inline, never modal: a card on the drop page, else the status bar (a card written while
+        the progress page or the viewer shows would surface later, stale)."""
+        if self.stack.currentWidget() is not self.drop_page:
+            self.statusBar().showMessage(f"{title}. {body}".strip(), 10000)
+            return
+        self.drop_page.notice.show_message(title, body, details=details, level=level)
 
     def open_path(
         self,
@@ -253,8 +291,13 @@ class MainWindow(QMainWindow):
         self.open_path(smp.path, protocol=smp.protocol, out_dir=Path("ptv_out") / "sample")
 
     def _choose_video(self) -> None:
+        # Downloads first: AirDrop puts the clip there
+        start = Path.home() / "Downloads"
         f, _ = QFileDialog.getOpenFileName(
-            self, "Open video", "", "Videos (*.mp4 *.mov *.m4v *.avi *.mkv *.webm)"
+            self,
+            "Open video",
+            str(start) if start.is_dir() else "",
+            "Videos (*.mp4 *.mov *.m4v *.avi *.mkv *.webm)",
         )
         if f:
             self.open_path(Path(f))
@@ -267,9 +310,17 @@ class MainWindow(QMainWindow):
     # ---- jobs -------------------------------------------------------------------------
     def start_job(self, spec: JobSpec) -> None:
         if self._worker is not None and self._worker.isRunning():
-            QMessageBox.information(self, "ptvision", "A job is already running.")
+            if self._job_source is not None and self._job_source.resolve() == spec.source.resolve():
+                return  # the same video again (dropped twice, or dropped and auto-detected)
+            self.statusBar().showMessage(
+                f"Still processing {self._job_source.name if self._job_source else 'a video'}; "
+                f"drop {spec.source.name} again when it finishes.",
+                10000,
+            )
             return
         self.close_trial()
+        self.drop_page.notice.clear()
+        self._job_source = spec.source
         backend = self._backend_factory() if self._backend_factory else None
         self._worker = PipelineWorker(spec, backend=backend, parent=self)
         self._worker.progress.connect(self.progress_page.set_progress)
@@ -293,23 +344,20 @@ class MainWindow(QMainWindow):
 
     def _job_done(self, result: WorkerResult) -> None:
         self._worker = None
+        self._job_source = None
         self.open_trial(result.trial_dir, run_id=result.run_id)
 
     def _job_failed(self, message: str, tb: str) -> None:
         self._worker = None
+        self._job_source = None
         self.stack.setCurrentWidget(self.drop_page)
         self.statusBar().showMessage(f"failed: {message}")
-        if self.screenshot_mode:
-            return
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Critical)
-        box.setWindowTitle("ptvision")
-        box.setText(f"Processing failed:\n{message}")
-        box.setDetailedText(tb)
-        box.exec()
+        title, body = friendly_failure(message)
+        self.notify(title, body, details=tb)
 
     def _job_cancelled(self) -> None:
         self._worker = None
+        self._job_source = None
         self.stack.setCurrentWidget(self.drop_page)
         self.statusBar().showMessage("cancelled")
 
@@ -319,8 +367,8 @@ class MainWindow(QMainWindow):
             session = TrialSession.load(trial_dir, run_id)
             source = FrameSource(session.video_path)
         except Exception as e:
-            QMessageBox.critical(self, "ptvision", f"Could not open trial:\n{e}")
             self.stack.setCurrentWidget(self.drop_page)
+            self.notify("Couldn't open that trial", str(e), details=traceback.format_exc())
             return
         self.close_trial()
         self._session = session
@@ -340,6 +388,9 @@ class MainWindow(QMainWindow):
             self._on_frame(0)
         QTimer.singleShot(0, self.view.fit)
         self.drop_page.remember(trial_dir)
+        has_report = self.report_path() is not None
+        self.act_report.setEnabled(has_report)
+        self.panel.report_button.setVisible(has_report)
 
     def close_trial(self) -> None:
         if self._player is not None:
@@ -350,9 +401,30 @@ class MainWindow(QMainWindow):
         self.timeline.set_session(None)
         self.panel.set_session(None)
         self._session = None
+        self.act_report.setEnabled(False)
         self.setWindowTitle("ptvision")
         if self.stack.currentWidget() is self.viewer:
             self.stack.setCurrentWidget(self.drop_page)
+
+    def report_path(self) -> Path | None:
+        s = self._session
+        if s is None or s.run is None:
+            return None
+        path = s.run.path / "report.html"
+        return path.resolve() if path.exists() else None
+
+    def open_report(self) -> bool:
+        path = self.report_path()
+        if path is None:
+            self.statusBar().showMessage("No report for this trial (skeleton-only runs have none)")
+            return False
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def toggle_full_screen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
 
     @property
     def job_running(self) -> bool:
@@ -434,7 +506,7 @@ class MainWindow(QMainWindow):
 def main(
     source: Path | None = None,
     *,
-    protocol: str = "pose",
+    protocol: str | None = None,
     out_dir: Path | None = None,
     run_id: str | None = None,
     subject: Subject | None = None,
@@ -450,9 +522,10 @@ def main(
         win.drop_page.max_height_box.setCurrentIndex(
             max(0, win.drop_page.max_height_box.findData(int(max_height)))
         )
+    if protocol:
+        win.drop_page.select_protocol(protocol)  # a built-in id; a TOML path still runs below
     win.show()
     if source is not None:
-        win.drop_page.select_protocol(protocol)
         win.open_path(Path(source), protocol=protocol, run_id=run_id, out_dir=out_dir)
     shot = os.environ.get("PTV_APP_SCREENSHOT")
     if shot:

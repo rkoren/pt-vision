@@ -9,13 +9,16 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QImage, QIntValidator, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +26,71 @@ from PySide6.QtWidgets import (
 from ptvision._version import __version__
 from ptvision.clinical.protocol import builtin_protocol_ids
 from ptvision.trials.models import Subject
+from ptvision.viz import status as vs
+
+DEFAULT_PROTOCOL = "sts_5x"
+
+
+class NoticeCard(QFrame):
+    """An inline message on the drop page, shown in place of a modal dialog (a dialog in front of
+    a class or a patient blocks the app until someone finds the OK button)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("notice")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        top = QHBoxLayout()
+        self.title = QLabel()
+        self.title.setWordWrap(True)
+        self.title.setStyleSheet("font-weight: 600;")
+        self.dismiss = QToolButton()
+        self.dismiss.setText("Dismiss")
+        self.dismiss.clicked.connect(self.clear)
+        top.addWidget(self.title, 1)
+        top.addWidget(self.dismiss, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addLayout(top)
+        self.body = QLabel()
+        self.body.setWordWrap(True)
+        lay.addWidget(self.body)
+        self.toggle = QToolButton()
+        self.toggle.setText("Show details")
+        self.toggle.setCheckable(True)
+        lay.addWidget(self.toggle, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.details = QPlainTextEdit()
+        self.details.setReadOnly(True)
+        self.details.setMaximumHeight(160)
+        self.details.hide()
+        lay.addWidget(self.details)
+        self.toggle.toggled.connect(self._toggle_details)
+        self.hide()
+
+    def show_message(
+        self, title: str, body: str, *, details: str = "", level: str = "fail"
+    ) -> None:
+        color = vs.hex_of(vs.STOPS[0][1] if level == "fail" else vs.STOPS[1][1])
+        self.setStyleSheet(
+            f"QFrame#notice {{ border: 1px solid {color}; border-left: 6px solid {color};"
+            " border-radius: 10px; }"
+        )
+        self.title.setText(title)
+        self.title.setStyleSheet(f"font-weight: 600; color: {color};")
+        self.body.setText(body)
+        self.body.setVisible(bool(body))
+        self.details.setPlainText(details)
+        self.toggle.setChecked(False)
+        self.toggle.setVisible(bool(details))
+        self.show()
+
+    def clear(self) -> None:
+        self.title.clear()
+        self.body.clear()
+        self.details.clear()
+        self.hide()
+
+    def _toggle_details(self, on: bool) -> None:
+        self.details.setVisible(on)
+        self.toggle.setText("Hide details" if on else "Show details")
 
 
 class DropPage(QWidget):
@@ -41,6 +109,9 @@ class DropPage(QWidget):
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint.setStyleSheet("border: 2px dashed #6b7280; border-radius: 14px; padding: 48px;")
         lay.addWidget(self.hint)
+        self.notice = NoticeCard()
+        self.notice.setFixedWidth(640)
+        lay.addWidget(self.notice, alignment=Qt.AlignmentFlag.AlignHCenter)
         row = QHBoxLayout()
         row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(QLabel("Protocol:"))
@@ -113,6 +184,7 @@ class DropPage(QWidget):
         )
         self._restore_prefs()
         self.max_height_box.currentIndexChanged.connect(self._save_prefs)
+        self.protocol.currentIndexChanged.connect(self._save_prefs)
         self.recent_label = QLabel("Recent")
         self.recent_label.setStyleSheet("color: #9aa4b2; margin-top: 12px;")
         self.recent = QListWidget()
@@ -174,6 +246,9 @@ class DropPage(QWidget):
         return [Path(str(x)) for x in items if str(x)]
 
     def remember(self, trial_dir: Path) -> None:
+        # absolute: trials default to ./ptv_out, so a relative entry vanishes when the app is
+        # launched from another folder
+        trial_dir = trial_dir.resolve()
         paths = [p for p in self.recent_paths() if p != trial_dir]
         paths.insert(0, trial_dir)
         self._settings.setValue("recent/trials", [str(p) for p in paths[:8]])
@@ -197,6 +272,7 @@ class DropPage(QWidget):
 
     def _save_prefs(self) -> None:
         self._settings.setValue("ingest/max_height", int(self.max_height_box.currentData()))
+        self._settings.setValue("job/protocol", self.selected_protocol())
 
     def _restore_prefs(self) -> None:
         try:
@@ -204,6 +280,11 @@ class DropPage(QWidget):
         except (TypeError, ValueError):
             cap = 0
         self.max_height_box.setCurrentIndex(max(0, self.max_height_box.findData(cap)))
+        # the last protocol chosen, else 5xSTS: a dropped clip should be measured, not only tracked
+        pid = str(self._settings.value("job/protocol", DEFAULT_PROTOCOL))
+        if self.protocol.findData(pid) < 0:
+            pid = DEFAULT_PROTOCOL
+        self.select_protocol(pid)
         self._settings.remove("subject")  # drop values persisted by the pre-fix build
 
     def select_protocol(self, pid: str) -> None:
