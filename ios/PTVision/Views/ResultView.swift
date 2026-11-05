@@ -22,6 +22,7 @@ struct ResultView: View {
             transport
             ScrollView {
                 VStack(spacing: 14) {
+                    SampleDataBanner()
                     headline
                     FilmingNote()
                     chartCard

@@ -124,7 +124,20 @@ struct RecordView: View {
         .padding(.top, 6)
     }
 
+    /// Not the measurement: the phone runs the smaller RTMPose-s, unfiltered, with no view
+    /// correction, so these can differ from what the laptop reports for the same recording.
     private var liveAngles: some View {
+        VStack(spacing: 6) {
+            liveAngleChips
+            Text("Live preview · the laptop gives the measurement")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.horizontal, 10).padding(.vertical, 3)
+                .background(.black.opacity(0.35), in: .capsule)
+        }
+    }
+
+    private var liveAngleChips: some View {
         GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
                 ForEach(Angle.allCases) { a in
@@ -157,11 +170,13 @@ struct RecordView: View {
                 let checks = capture.checks
                 let open = checks.filter { $0.state != .pass }
                 HStack(spacing: 12) {
-                    Image(systemName: open.isEmpty ? "checkmark.seal.fill" : "viewfinder")
+                    Image(systemName: capture.ready ? "checkmark.seal.fill" : "viewfinder")
                         .font(.title3)
-                        .foregroundStyle(open.isEmpty ? Color.accent : .white)
+                        .foregroundStyle(capture.ready ? Color.accent : .white)
                         .contentTransition(.symbolEffect(.replace))
-                    Text(open.isEmpty ? "Ready to film" : "\(checks.count - open.count) of \(checks.count) filming checks passed")
+                    Text(capture.ready
+                         ? (open.isEmpty ? "Ready to film" : "Ready to film · \(open.count) note\(open.count == 1 ? "" : "s")")
+                         : "\(checks.count - open.count) of \(checks.count) filming checks passed")
                         .font(.subheadline.weight(.semibold))
                         .contentTransition(.numericText())
                     Spacer(minLength: 0)

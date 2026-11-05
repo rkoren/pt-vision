@@ -38,7 +38,7 @@ final class LiveCapture {
     private(set) var image: CGImage?
     private(set) var pose: PoseFrame?
     private(set) var modelFPS: Double = 0
-    private(set) var tiltDegrees: Double?
+    private(set) var tilt: PhoneTilt?
     private(set) var steady: Bool?
     private(set) var cameraDenied = false
     private(set) var stands = 0
@@ -94,13 +94,13 @@ final class LiveCapture {
     }
 
     private func startMotion() {
-        guard motion.isDeviceMotionAvailable else { tiltDegrees = nil; steady = nil; return }
+        guard motion.isDeviceMotionAvailable else { tilt = nil; steady = nil; return }
         motion.deviceMotionUpdateInterval = 1 / 30
         motion.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
             guard let self, let m else { return }
-            // Portrait roll: gravity x vs y. 0° when the phone's long edge is vertical.
+            // Roll and pitch from upright portrait: both 0° when the phone's long edge is vertical.
             let g = m.gravity
-            self.tiltDegrees = atan2(g.x, -g.y) * 180 / .pi
+            self.tilt = PhoneTilt(gravityX: g.x, y: g.y, z: g.z)
             let r = m.rotationRate
             self.smoothedRotation = 0.85 * self.smoothedRotation + 0.15 * sqrt(r.x * r.x + r.y * r.y + r.z * r.z)
             self.steady = self.smoothedRotation < 0.08
@@ -111,7 +111,7 @@ final class LiveCapture {
         self.image = image
         self.pose = pose
         self.modelFPS = fps
-        if let r = medianViewRatio { viewRatios.append(r); if viewRatios.count > 60 { viewRatios.removeFirst() } }
+        if let r = pose?.viewRatio { viewRatios.append(r); if viewRatios.count > 60 { viewRatios.removeFirst() } }
         if recording {
             counter.update(knee: pose?.kneeFlexion)
             stands = counter.count
@@ -123,10 +123,10 @@ final class LiveCapture {
 
     var checks: [LiveCheck] {
         var out: [LiveCheck] = []
-        if let tilt = tiltDegrees {
-            let a = abs(tilt)
+        if let tilt {
+            let a = tilt.worstDegrees
             out.append(.init(id: "level", label: "Phone is level", state: a < 3 ? .pass : a < 8 ? .warn : .fail,
-                             fix: "Tilted \(Int(a.rounded()))° · straighten the phone"))
+                             fix: tilt.fix))
         } else {
             out.append(.init(id: "level", label: "Phone is level", state: .pass, fix: "No motion sensor here; not checked"))
         }
@@ -134,7 +134,7 @@ final class LiveCapture {
         if let r = medianViewRatio {
             let state: CheckState = r < 0.35 ? .pass : r < 0.50 ? .warn : .fail
             out.append(.init(id: "view", label: "Filming from the side", state: state,
-                             fix: state == .warn ? "A little off the side · angles less exact" : "Looks frontal · turn to face their side"))
+                             fix: state == .warn ? "Slightly angled · timing is fine, side-on is best for angles" : "Looks frontal · turn to face their side"))
         } else {
             out.append(.init(id: "view", label: "Filming from the side", state: .pending, fix: pose == nil ? "Looking for the person…" : "Checking the camera angle…"))
         }
@@ -158,7 +158,12 @@ final class LiveCapture {
         return s[s.count / 2]
     }
 
-    var ready: Bool { checks.allSatisfy { $0.state == .pass } }
+    /// Nothing failing or pending. A slightly angled view (amber) still counts: the laptop corrects
+    /// the joint angles for it and the timing doesn't depend on it. An amber level or steady check
+    /// doesn't count, because nothing corrects for those.
+    var ready: Bool {
+        checks.allSatisfy { $0.state == .pass || ($0.id == "view" && $0.state == .warn) }
+    }
 }
 
 /// Runs on its own serial queue: frames in, pose out. Late frames are dropped.

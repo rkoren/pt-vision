@@ -9,7 +9,7 @@ struct StartView: View {
         @Bindable var session = session
         List {
             Section {
-                Text("Film the test, and the measurements are ready in about 15 seconds. The video stays on this iPhone.")
+                Text("Film the test with live filming checks, then send the video to the laptop for the measurements.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .listRowBackground(Color.clear)

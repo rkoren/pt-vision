@@ -14,13 +14,13 @@ checks happen while the person is being filmed, rather than after the video is u
 Needs Xcode 27 and an iOS 27 simulator or device. From the repo root:
 
 ```sh
-uv run --no-project python ios/scripts/fetch_assets.py
+uv run python ios/scripts/fetch_assets.py
 open ios/PTVision.xcodeproj
 ```
 
-`fetch_assets.py` downloads the `lightweight` models using the URLs and checksums in
-`src/ptvision/pose/models.toml`, and copies the demo clips from this repo. These files stay out of
-git because the repo ignores `*.onnx` and `*.mp4`.
+`fetch_assets.py` gets the `lightweight` models the way `ptv models pull` does (the URLs and
+checksums in `src/ptvision/pose/models.toml`, the same cache), and copies the demo clips from this
+repo. These files stay out of git because the repo ignores `*.onnx` and `*.mp4`.
 
 The simulator runs on the demo clip, because it has no camera. To run on a device, choose your team
 under Signing & Capabilities and change the bundle ID (`com.piramsingh.ptvision`) to one you can
