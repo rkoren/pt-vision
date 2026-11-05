@@ -6,6 +6,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 
+from ptvision.app import theme
 from ptvision.app.session import TrialSession
 
 PHASE_COLORS = {
@@ -20,7 +21,7 @@ class AngleTimeline(pg.GraphicsLayoutWidget):  # type: ignore[misc]
 
     def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
         super().__init__(parent)
-        self.setBackground("#1a1b1e")
+        self.setBackground(theme.CARD)
         self._session: TrialSession | None = None
         self._names: list[str] = []
         self._plots: list[pg.PlotItem] = []

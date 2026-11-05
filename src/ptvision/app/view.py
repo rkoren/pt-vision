@@ -7,6 +7,7 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QPainter, QPixmap, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QLabel
 
+from ptvision.app import theme
 from ptvision.app.overlay import SkeletonItem
 from ptvision.app.session import TrialSession
 from ptvision.video import FrameSource
@@ -53,7 +54,7 @@ class VideoView(QGraphicsView):
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform
         )
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setBackgroundBrush(QColor(18, 18, 20))
+        self.setBackgroundBrush(QColor(theme.BG))
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)

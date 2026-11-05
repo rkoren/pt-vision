@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QAction,
     QDesktopServices,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDropEvent,
     QKeyEvent,
     QKeySequence,
@@ -33,6 +34,7 @@ from ptvision.app.pages import DropPage, ProgressPage
 from ptvision.app.panel import SidePanel
 from ptvision.app.player import Player
 from ptvision.app.session import TrialSession
+from ptvision.app.theme import apply_theme
 from ptvision.app.timeline import AngleTimeline
 from ptvision.app.view import VideoView
 from ptvision.app.worker import JobSpec, PipelineWorker, WorkerResult
@@ -223,8 +225,14 @@ class MainWindow(QMainWindow):
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
+            self.drop_page.set_drag_active(True)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self.drop_page.set_drag_active(False)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:
+        self.drop_page.set_drag_active(False)
         paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
         if paths:
             event.acceptProposedAction()
@@ -331,8 +339,7 @@ class MainWindow(QMainWindow):
         self._worker.failed.connect(self._job_failed)
         self._worker.cancelled.connect(self._job_cancelled)
         self._worker.finished.connect(self._worker.deleteLater)
-        self.progress_page.file.setText(str(spec.source))
-        self.progress_page.set_stage("starting")
+        self.progress_page.set_job(spec.source, spec.protocol)
         self.stack.setCurrentWidget(self.progress_page)
         self.statusBar().showMessage(f"processing {spec.source.name}")
         self._worker.start()
@@ -515,6 +522,8 @@ def main(
 ) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("ptvision")
+    if isinstance(app, QApplication):
+        apply_theme(app)
     win = MainWindow()
     if subject is not None:
         win.drop_page.set_subject(height_m=subject.height_m, age=subject.age_years, sex=subject.sex)

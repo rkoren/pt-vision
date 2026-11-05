@@ -1,15 +1,18 @@
-"""The pre-viewer pages (drop page + progress page)"""
+"""[REVIEW] The pre-viewer pages (drop page + progress page), laid out like the iPhone prototype's
+Start and Processing screens (ios/PTVision/Views/StartView.swift, ProcessingView.swift)."""
 
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QImage, QIntValidator, QPixmap
+from PySide6.QtGui import QImage, QIntValidator, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -18,17 +21,40 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ptvision._version import __version__
-from ptvision.clinical.protocol import builtin_protocol_ids
+from ptvision.app import theme
+from ptvision.clinical.protocol import builtin_protocol_ids, load_protocol
 from ptvision.trials.models import Subject
-from ptvision.viz import status as vs
 
 DEFAULT_PROTOCOL = "sts_5x"
+POSE_ONLY = "pose"
+
+# short names for the test picker; other protocols show their TOML name
+_TEST_NAMES = {
+    "sts_5x": "Five-times sit-to-stand",
+    "sts_30s": "30-second chair stand",
+    POSE_ONLY: "Skeleton only",
+}
+
+
+def card(parent: QWidget | None = None) -> QFrame:
+    f = QFrame(parent)
+    f.setObjectName("card")
+    return f
+
+
+def label(text: str = "", role: str | None = None, *, wrap: bool = False) -> QLabel:
+    lbl = QLabel(text)
+    if role:
+        theme.set_role(lbl, role)
+    lbl.setWordWrap(wrap)
+    return lbl
 
 
 class NoticeCard(QFrame):
@@ -43,7 +69,6 @@ class NoticeCard(QFrame):
         top = QHBoxLayout()
         self.title = QLabel()
         self.title.setWordWrap(True)
-        self.title.setStyleSheet("font-weight: 600;")
         self.dismiss = QToolButton()
         self.dismiss.setText("Dismiss")
         self.dismiss.clicked.connect(self.clear)
@@ -68,13 +93,13 @@ class NoticeCard(QFrame):
     def show_message(
         self, title: str, body: str, *, details: str = "", level: str = "fail"
     ) -> None:
-        color = vs.hex_of(vs.STOPS[0][1] if level == "fail" else vs.STOPS[1][1])
+        color = theme.RED if level == "fail" else theme.AMBER
         self.setStyleSheet(
-            f"QFrame#notice {{ border: 1px solid {color}; border-left: 6px solid {color};"
-            " border-radius: 10px; }"
+            f"QFrame#notice {{ background: {theme.CARD}; border: 1px solid {color};"
+            f" border-left: 6px solid {color}; border-radius: 14px; }}"
         )
         self.title.setText(title)
-        self.title.setStyleSheet(f"font-weight: 600; color: {color};")
+        self.title.setStyleSheet(f"font-weight: 700; color: {color};")
         self.body.setText(body)
         self.body.setVisible(bool(body))
         self.details.setPlainText(details)
@@ -93,116 +118,228 @@ class NoticeCard(QFrame):
         self.toggle.setText("Hide details" if on else "Show details")
 
 
+class DropZone(QFrame):
+    """The dashed target. It lights up in the accent while a file is dragged over the window."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("drop")
+        self.setMinimumHeight(220)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(32, 28, 32, 28)
+        lay.setSpacing(8)
+        lay.addStretch(1)
+        self.title = label("Drop the video here", "headline")
+        self.title.setStyleSheet("font-size: 26px;")
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.title)
+        sub = label(
+            "A side view of the whole test, from the phone or a folder from a previous run. "
+            "It is processed on this laptop and never uploaded.",
+            "secondary",
+            wrap=True,
+        )
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(sub)
+        lay.addSpacing(10)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.open_video = QPushButton("Choose video…")
+        theme.prominent(self.open_video)
+        self.open_trial = QPushButton("Open a previous trial…")
+        row.addWidget(self.open_video)
+        row.addWidget(self.open_trial)
+        row.addStretch(1)
+        lay.addLayout(row)
+        lay.addStretch(1)
+        self.set_active(False)
+
+    def set_active(self, on: bool) -> None:
+        border = theme.ACCENT if on else theme.TEXT_3
+        fill = "rgba(166, 255, 0, 0.08)" if on else theme.CARD
+        self.setStyleSheet(
+            f"QFrame#drop {{ background: {fill}; border: 2px dashed {border};"
+            " border-radius: 22px; }"
+        )
+        self.title.setText("Release to process" if on else "Drop the video here")
+
+
 class DropPage(QWidget):
     hide_temp_dirs = True
 
     def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint = QLabel(
-            "<h2>Drop a video here</h2>"
-            "<p>a phone clip of a sit-to-stand test, or a folder from a previous run. No video "
-            "yet? Try the sample clip below.<br>"
-            "The video is processed on this computer and never uploaded.</p>"
+        outer = QHBoxLayout(self)
+        outer.addStretch(1)
+        col = QVBoxLayout()
+        col.setSpacing(14)
+        col.setContentsMargins(0, 28, 0, 16)
+        holder = QWidget()
+        holder.setLayout(col)
+        holder.setMaximumWidth(920)
+        holder.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        outer.addWidget(holder, 6)
+        outer.addStretch(1)
+
+        col.addWidget(label("New test", "title"))
+        col.addWidget(
+            label(
+                "Film the test on the phone, AirDrop the video to this laptop, then drop it here.",
+                "secondary",
+                wrap=True,
+            )
         )
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint.setStyleSheet("border: 2px dashed #6b7280; border-radius: 14px; padding: 48px;")
-        lay.addWidget(self.hint)
+        self.drop_zone = DropZone()
+        self.open_video = self.drop_zone.open_video
+        self.open_trial = self.drop_zone.open_trial
+        col.addWidget(self.drop_zone)
         self.notice = NoticeCard()
-        self.notice.setFixedWidth(640)
-        lay.addWidget(self.notice, alignment=Qt.AlignmentFlag.AlignHCenter)
-        row = QHBoxLayout()
-        row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        row.addWidget(QLabel("Protocol:"))
+        col.addWidget(self.notice)
+
+        # test + patient cards
+        cards = QHBoxLayout()
+        cards.setSpacing(14)
+        test_card = card()
+        tl = QVBoxLayout(test_card)
+        tl.setContentsMargins(18, 14, 18, 16)
+        tl.addWidget(label("TEST", "section"))
         self.protocol = QComboBox()
-        self.protocol.addItem("Pose only", "pose")
-        for pid in builtin_protocol_ids():
-            self.protocol.addItem(pid, pid)
-        row.addWidget(self.protocol)
-        self.open_video = QPushButton("Open video…")
-        self.open_trial = QPushButton("Open trial…")
+        for pid in self._protocol_order():
+            self.protocol.addItem(self._test_name(pid), pid)
+        tl.addWidget(self.protocol)
+        self.protocol_summary = label("", "caption", wrap=True)
+        tl.addWidget(self.protocol_summary)
+        tl.addStretch(1)
+        cards.addWidget(test_card, 1)
+
+        patient = card()
+        pl = QGridLayout(patient)
+        pl.setContentsMargins(18, 14, 18, 16)
+        pl.setHorizontalSpacing(10)
+        pl.setVerticalSpacing(8)
+        pl.addWidget(label("PATIENT · OPTIONAL", "section"), 0, 0, 1, 4)
+        self.age_box = QLineEdit()
+        self.age_box.setPlaceholderText("years")
+        self.age_box.setValidator(QIntValidator(1, 120))
+        self.age_box.setFixedWidth(70)
+        self.age_box.setToolTip("Age in years (selects the reference band)")
+        self.feet_box = QLineEdit()
+        self.feet_box.setPlaceholderText("ft")
+        self.feet_box.setValidator(QIntValidator(3, 7))
+        self.feet_box.setFixedWidth(52)
+        self.feet_box.setToolTip("Height, feet")
+        self.inch_box = QLineEdit()
+        self.inch_box.setPlaceholderText("in")
+        self.inch_box.setValidator(QIntValidator(0, 11))
+        self.inch_box.setFixedWidth(52)
+        self.inch_box.setToolTip("Height, inches")
+        self.sex_box = QComboBox()
+        for text, value in (("not given", ""), ("female", "f"), ("male", "m")):
+            self.sex_box.addItem(text, value)
+        pl.addWidget(label("Age"), 1, 0)
+        pl.addWidget(self.age_box, 1, 1)
+        pl.addWidget(label("Height"), 2, 0)
+        height = QHBoxLayout()
+        height.setSpacing(6)
+        height.addWidget(self.feet_box)
+        height.addWidget(label("′"))
+        height.addWidget(self.inch_box)
+        height.addWidget(label("″"))
+        height.addStretch(1)
+        pl.addLayout(height, 2, 1, 1, 3)
+        pl.addWidget(label("Sex"), 3, 0)
+        pl.addWidget(self.sex_box, 3, 1, 1, 2)
+        pl.addWidget(
+            label("Age picks the reference values. No names are stored.", "caption", wrap=True),
+            4,
+            0,
+            1,
+            4,
+        )
+        pl.setColumnStretch(3, 1)
+        cards.addWidget(patient, 1)
+        col.addLayout(cards)
+
+        # recent + sample
+        head = QHBoxLayout()
+        self.recent_label = label("RECENT", "section")
+        head.addWidget(self.recent_label)
+        head.addStretch(1)
         self.try_sample = QPushButton("Try the sample clip")
         self.try_sample.setToolTip(
             "A bundled 13-second sit-to-stand recording, filmed at an oblique angle; "
             "processes in about 15 s"
         )
-        row.addWidget(self.open_video)
-        row.addWidget(self.open_trial)
-        row.addWidget(self.try_sample)
-        lay.addLayout(row)
-        sub = QHBoxLayout()
-        sub.setSpacing(6)
-        sub.addStretch(1)
-        sub.addWidget(QLabel("Subject:"))
+        head.addWidget(self.try_sample)
+        col.addLayout(head)
+        self.recent = QListWidget()
+        self.recent.setMaximumHeight(150)
+        self.recent.setToolTip("Double-click to reopen an analysed trial")
+        col.addWidget(self.recent)
+        col.addStretch(1)
 
-        # input fields
-        self.feet_box = QLineEdit()
-        self.feet_box.setPlaceholderText("ft")
-        self.feet_box.setValidator(QIntValidator(3, 7))
-        self.feet_box.setFixedWidth(48)
-        self.feet_box.setToolTip("Height, feet")
-        self.inch_box = QLineEdit()
-        self.inch_box.setPlaceholderText("in")
-        self.inch_box.setValidator(QIntValidator(0, 11))
-        self.inch_box.setFixedWidth(48)
-        self.inch_box.setToolTip("Height, inches")
-        sub.addSpacing(6)
-        sub.addWidget(QLabel("height"))
-        sub.addWidget(self.feet_box)
-        sub.addWidget(QLabel("′"))
-        sub.addWidget(self.inch_box)
-        sub.addWidget(QLabel("″"))
-        self.age_box = QLineEdit()
-        self.age_box.setPlaceholderText("age")
-        self.age_box.setValidator(QIntValidator(1, 120))
-        self.age_box.setFixedWidth(56)
-        self.age_box.setToolTip("Age in years (selects the reference band)")
-        sub.addSpacing(12)
-        sub.addWidget(self.age_box)
-        self.sex_box = QComboBox()
-        for label, value in (("sex", ""), ("female", "f"), ("male", "m")):
-            self.sex_box.addItem(label, value)
-        sub.addSpacing(12)
-        sub.addWidget(self.sex_box)
+        foot = QHBoxLayout()
+        self.note = label(f"ptvision {__version__} · measurement tool", "caption")
+        foot.addWidget(self.note)
+        foot.addStretch(1)
+        foot.addWidget(label("Video size", "caption"))
         self.max_height_box = QComboBox()
-        for label, cap in (
+        for text, cap in (
             ("full resolution", 0),
             ("downscale to 1080", 1080),
             ("downscale to 720", 720),
         ):
-            self.max_height_box.addItem(label, cap)
+            self.max_height_box.addItem(text, cap)
         self.max_height_box.setToolTip(
             "Cap the shorter side of the frame during ingest (4K clips are slow)"
         )
-        sub.addSpacing(12)
-        sub.addWidget(self.max_height_box)
-        sub.addStretch(1)
-        lay.addLayout(sub)
+        foot.addWidget(self.max_height_box)
+        col.addLayout(foot)
+
         self._settings = QSettings(
             QSettings.Format.IniFormat, QSettings.Scope.UserScope, "ptvision", "app"
         )
         self._restore_prefs()
+        self._show_summary()
         self.max_height_box.currentIndexChanged.connect(self._save_prefs)
         self.protocol.currentIndexChanged.connect(self._save_prefs)
-        self.recent_label = QLabel("Recent")
-        self.recent_label.setStyleSheet("color: #9aa4b2; margin-top: 12px;")
-        self.recent = QListWidget()
-        self.recent.setMaximumHeight(120)
-        self.recent.setFixedWidth(640)
-        self.recent.setToolTip("Double-click to reopen an analysed trial")
-        lay.addWidget(self.recent_label, alignment=Qt.AlignmentFlag.AlignHCenter)
-        lay.addWidget(self.recent, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.protocol.currentIndexChanged.connect(self._show_summary)
         self._load_recent()
-        self.note = QLabel(
-            f"<span style='color:#9aa4b2'>ptvision {__version__} · measurement tool</span>"
-        )
-        self.note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.note)
+
+    # ---- the test picker ---------------------------------------------------------------
+    @staticmethod
+    def _protocol_order() -> list[str]:
+        ids = builtin_protocol_ids()
+        first = [p for p in (DEFAULT_PROTOCOL,) if p in ids]
+        return [*first, *(p for p in ids if p not in first), POSE_ONLY]
+
+    @staticmethod
+    def _test_name(pid: str) -> str:
+        if pid in _TEST_NAMES:
+            return _TEST_NAMES[pid]
+        try:
+            return load_protocol(pid).protocol.name
+        except Exception:
+            return pid
+
+    def _show_summary(self) -> None:
+        pid = self.selected_protocol()
+        if pid == POSE_ONLY:
+            text = "Tracks the skeleton and shows the joint angles. No test measurements."
+        else:
+            try:
+                text = load_protocol(pid).protocol.summary
+            except Exception:
+                text = ""
+        self.protocol_summary.setText(text)
 
     def selected_protocol(self) -> str:
         return str(self.protocol.currentData())
 
+    def set_drag_active(self, on: bool) -> None:
+        self.drop_zone.set_active(on)
+
+    # ---- patient fields -------------------------------------------------------------------
     @staticmethod
     def _int(text: str) -> int | None:
         text = text.strip()
@@ -263,7 +400,8 @@ class DropPage(QWidget):
                 continue
             if self.hide_temp_dirs and p.resolve().is_relative_to(tmp):
                 continue
-            item = QListWidgetItem(f"{p.name}   ({p.parent})")
+            item = QListWidgetItem(f"{p.name}    ·    {p.parent.name}")
+            item.setToolTip(str(p.resolve()))
             item.setData(Qt.ItemDataRole.UserRole, str(p))
             self.recent.addItem(item)
         has = self.recent.count() > 0
@@ -293,57 +431,165 @@ class DropPage(QWidget):
             self.protocol.setCurrentIndex(idx)
 
 
+# Pipeline stage names (pipeline.py) grouped into the steps the progress page lists
+_STEPS: list[tuple[str, tuple[str, ...]]] = [
+    ("Preparing the video", ("ingest", "loading model")),
+    ("Tracking the skeleton", ("pose", "pose (reusing cached keypoints)")),
+    ("Checking the filming", ("quality checks",)),
+    ("Smoothing", ("filtering",)),
+    ("Finding the repetitions", ("segmenting",)),
+    ("Measuring", ("metrics",)),
+    ("Writing the report", ("writing artifacts", "report", "overlay")),
+]
+_POSE_ONLY_STEPS = 2  # pose-only jobs stop after tracking
+
+
+class _StepRow(QWidget):
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 8, 14, 8)
+        self.icon = QLabel("○")
+        self.icon.setFixedWidth(22)
+        self.text = QLabel(text)
+        self.detail = label("", "caption")
+        lay.addWidget(self.icon)
+        lay.addWidget(self.text, 1)
+        lay.addWidget(self.detail)
+        self.set_state("pending")
+
+    def set_state(self, state: str) -> None:
+        glyph, color, weight = {
+            "done": ("✓", theme.ACCENT, 400),
+            "current": ("●", theme.TEXT, 700),
+            "pending": ("○", theme.TEXT_3, 400),
+        }[state]
+        self.icon.setText(glyph)
+        self.icon.setStyleSheet(f"color: {color}; font-weight: 700;")
+        text_color = theme.TEXT_2 if state == "pending" else theme.TEXT
+        self.text.setStyleSheet(f"color: {text_color}; font-weight: {weight};")
+        if state != "current":
+            self.detail.setText("")
+
+
 class ProgressPage(QWidget):
     def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.file = QLabel("")
-        self.file.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stage = QLabel("starting")
-        self.stage.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stage.setStyleSheet("font-size: 16px; font-weight: 600;")
-        self.bar = QProgressBar()
-        self.bar.setRange(0, 0)
-        self.bar.setFixedWidth(420)
-        self.cancel = QPushButton("Cancel")
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(28, 28, 28, 28)
+        outer.setSpacing(24)
 
+        # live tracking preview
+        self.preview_card = card()
+        self.preview_card.setStyleSheet(
+            f"QFrame#card {{ background: {theme.CARD}; border-radius: 22px; }}"
+        )
+        pv = self._preview_layout = QVBoxLayout(self.preview_card)
+        pv.setContentsMargins(12, 12, 12, 12)
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumSize(1, 1)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.preview.hide()
+        self.live_badge = QLabel(f"<span style='color:{theme.ACCENT}'>●</span>&nbsp; Live tracking")
+        self.live_badge.setStyleSheet("font-weight: 600;")
+        self.live_badge.hide()
+        pv.addWidget(self.live_badge)
+        pv.addWidget(self.preview, 1)
+        self.waiting = label("The tracked skeleton appears here", "secondary")
+        self.waiting.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pv.addWidget(self.waiting)
         self._preview_image: QImage | None = None
-        lay.addWidget(self.preview, alignment=Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.file)
-        lay.addWidget(self.stage)
-        lay.addWidget(self.bar, alignment=Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.cancel, alignment=Qt.AlignmentFlag.AlignCenter)
+        outer.addWidget(self.preview_card, 3)
+
+        # stage, progress and the step list
+        side = QVBoxLayout()
+        side.setSpacing(12)
+        side.addStretch(1)
+        side.addWidget(label("ANALYSING", "section"))
+        self.file = label("", "secondary", wrap=True)
+        side.addWidget(self.file)
+        self.stage = label("Starting…", "title")
+        self.stage.setWordWrap(True)
+        side.addWidget(self.stage)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 0)
+        side.addWidget(self.bar)
+        self.status = label("", "caption")
+        side.addWidget(self.status)
+        steps = card()
+        sl = QVBoxLayout(steps)
+        sl.setContentsMargins(4, 6, 4, 6)
+        sl.setSpacing(0)
+        self._rows = [_StepRow(text) for text, _ in _STEPS]
+        for row in self._rows:
+            sl.addWidget(row)
+        side.addWidget(steps)
+        side.addSpacing(6)
+        self.cancel = QPushButton("Cancel")
+        side.addWidget(self.cancel, alignment=Qt.AlignmentFlag.AlignLeft)
+        side.addStretch(1)
+        holder = QWidget()
+        holder.setLayout(side)
+        holder.setFixedWidth(420)
+        outer.addWidget(holder)
+
+        self._current: int | None = None
+        self._n_steps = len(_STEPS)
+        self._pose_clock: tuple[float, int] | None = None  # (time, frames) at the first frame
+
+    # ---- job and stages ---------------------------------------------------------------
+    def set_job(self, source: Path, protocol: str | None) -> None:
+        self.file.setText(source.name)
+        self.file.setToolTip(str(source))
+        pose_only = not protocol or protocol == POSE_ONLY
+        self._n_steps = _POSE_ONLY_STEPS if pose_only else len(_STEPS)
+        for i, row in enumerate(self._rows):
+            row.setVisible(i < self._n_steps)
+            row.set_state("pending")
+        self._current = None
+        self._pose_clock = None
+        self.set_stage("starting")
 
     def set_progress(self, done: int, total: int) -> None:
-        if total > 0:
-            self.bar.setRange(0, total)
-            self.bar.setValue(done)
-        else:
+        if total <= 0:
             self.bar.setRange(0, 0)
-
-    _STAGE_LABELS = {
-        "ingest": "preparing the video",
-        "loading model": "loading the model",
-        "pose": "tracking the skeleton",
-        "pose (reusing cached keypoints)": "loading saved tracking",
-        "quality checks": "checking the capture",
-        "filtering": "smoothing",
-        "segmenting": "finding the movements",
-        "metrics": "measuring",
-        "writing artifacts": "saving",
-        "report": "writing the report",
-        "overlay": "rendering the overlay",
-    }
+            return
+        self.bar.setRange(0, total)
+        self.bar.setValue(done)
+        if self._current == 1:  # tracking: frames, with a time estimate
+            now = time.monotonic()
+            if self._pose_clock is None or done < self._pose_clock[1]:
+                self._pose_clock = (now, done)
+            t0, d0 = self._pose_clock
+            rate = (done - d0) / (now - t0) if now > t0 and done > d0 else 0.0
+            left = f" · about {round((total - done) / rate)} s left" if rate > 0 else ""
+            self.status.setText(f"{done} of {total} frames{left}")
+            self._rows[1].detail.setText(f"{done} / {total}")
+        else:
+            self.status.setText(f"{round(100 * done / total)}%")
 
     def set_stage(self, name: str) -> None:
-        self.stage.setText(self._STAGE_LABELS.get(name, name))
         self.bar.setRange(0, 0)
+        self.status.setText("")
+        if name == "starting":
+            self.stage.setText("Starting…")
+            return
+        if name.startswith("cancel"):
+            self.stage.setText("Cancelling…")
+            return
+        step = next((i for i, (_, names) in enumerate(_STEPS) if name in names), None)
+        if step is None or step >= self._n_steps:
+            self.stage.setText(name[:1].upper() + name[1:])  # e.g. a one-time model download
+            return
+        self._current = step
+        for i, row in enumerate(self._rows):
+            row.set_state("done" if i < step else "current" if i == step else "pending")
+        self.stage.setText(_STEPS[step][0] + "…")
+        if name == "pose (reusing cached keypoints)":
+            self.status.setText("using the tracking saved from the last run")
 
+    # ---- live preview ------------------------------------------------------------------
     def set_preview(self, frame: object) -> None:
         import numpy as np
 
@@ -351,14 +597,34 @@ class ProgressPage(QWidget):
         h, w = arr.shape[:2]
         img = QImage(arr.data, w, h, arr.strides[0], QImage.Format.Format_BGR888).copy()
         self._preview_image = img
-        avail = max(240, min(560, self.height() - 200))
-        pix = QPixmap.fromImage(img)
-        if pix.height() > avail:
-            pix = pix.scaledToHeight(avail, Qt.TransformationMode.SmoothTransformation)
-        self.preview.setPixmap(pix)
+        self.waiting.hide()
         self.preview.show()
+        self.live_badge.show()
+        self._scale_preview()
+
+    def _scale_preview(self) -> None:
+        if self._preview_image is None:
+            return
+        # the card's inside less the header, not the label's: the label has no size until shown
+        m = self._preview_layout.contentsMargins()
+        size = self.preview_card.contentsRect().size().shrunkBy(m)
+        size.setHeight(size.height() - self.live_badge.sizeHint().height() - 8)
+        pix = QPixmap.fromImage(self._preview_image)
+        if size.width() > 1 and size.height() > 1:
+            pix = pix.scaled(
+                size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        self.preview.setPixmap(pix)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._scale_preview()
 
     def clear_preview(self) -> None:
         self.preview.clear()
         self.preview.hide()
+        self.live_badge.hide()
+        self.waiting.show()
         self._preview_image = None

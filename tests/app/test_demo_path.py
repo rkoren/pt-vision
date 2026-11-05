@@ -153,3 +153,49 @@ def test_full_screen_toggles(qtbot) -> None:
     assert w.windowState() & Qt.WindowState.WindowFullScreen
     w.act_fullscreen.trigger()
     assert not w.windowState() & Qt.WindowState.WindowFullScreen
+
+
+def test_progress_page_lists_the_steps_for_the_job(qtbot, tmp_path) -> None:
+    from ptvision.app.pages import ProgressPage
+
+    page = ProgressPage()
+    qtbot.addWidget(page)
+    page.show()
+    page.set_job(tmp_path / "IMG_0113.MOV", "sts_5x")
+    assert page.file.text() == "IMG_0113.MOV"
+    assert sum(r.isVisible() for r in page._rows) == 7
+    page.set_stage("ingest")
+    page.set_stage("pose")
+    assert page.stage.text() == "Tracking the skeleton…"
+    page.set_progress(100, 400)
+    page.set_progress(200, 400)
+    assert page.status.text().startswith("200 of 400 frames")
+    assert page._rows[1].detail.text() == "200 / 400"
+    assert page._rows[0].icon.text() == "✓" and page._rows[2].icon.text() == "○"
+    page.set_stage("segmenting")
+    assert page.stage.text() == "Finding the repetitions…"
+    assert all(r.icon.text() == "✓" for r in page._rows[:4])
+    page.set_stage("downloading model weights (balanced, one time, about 150 MB)")
+    assert page.stage.text().startswith("Downloading model weights")
+
+    page.set_job(tmp_path / "clip.mp4", "pose")  # skeleton only: no measuring steps
+    assert sum(r.isVisible() for r in page._rows) == 2
+
+
+def test_drop_zone_lights_up_while_dragging(qtbot) -> None:
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.drop_page.set_drag_active(True)
+    assert w.drop_page.drop_zone.title.text() == "Release to process"
+    w.drop_page.set_drag_active(False)
+    assert w.drop_page.drop_zone.title.text() == "Drop the video here"
+
+
+def test_test_picker_lists_5xsts_first_and_skeleton_only_last(qtbot) -> None:
+    w = MainWindow()
+    qtbot.addWidget(w)
+    combo = w.drop_page.protocol
+    ids = [combo.itemData(i) for i in range(combo.count())]
+    assert ids[0] == "sts_5x" and ids[-1] == "pose"
+    assert combo.itemText(0) == "Five-times sit-to-stand"
+    assert "five consecutive" in w.drop_page.protocol_summary.text()
