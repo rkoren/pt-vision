@@ -57,6 +57,18 @@ QPushButton#play {{ border-radius: 24px; padding: 0; min-width: 48px; min-height
 QPushButton#flat {{ background: transparent; color: {ACCENT}; padding: 6px 4px; }}
 QPushButton#flat:hover {{ color: #B8FF33; }}
 QPushButton#flat:checked {{ color: {TEXT}; }}
+QLabel[tag="validated"] {{
+    color: {ACCENT}; background: rgba(166, 255, 0, 0.16);
+    border-radius: 8px; padding: 2px 9px; font-size: 12px; font-weight: 600;
+}}
+QLabel[tag="estimate"] {{
+    color: {TEXT_2}; background: {FILL};
+    border-radius: 8px; padding: 2px 9px; font-size: 12px; font-weight: 600;
+}}
+QLabel[tag="fail"] {{
+    color: #FF8A80; background: rgba(214, 40, 40, 0.22);
+    border-radius: 8px; padding: 2px 9px; font-size: 12px; font-weight: 600;
+}}
 QLabel[role="title"] {{ font-size: 30px; font-weight: 700; }}
 QLabel[role="headline"] {{ font-size: 20px; font-weight: 700; }}
 QLabel[role="section"] {{ color: {TEXT_2}; font-size: 12px; font-weight: 600; }}
@@ -96,6 +108,7 @@ QListWidget {{ background: {CARD}; border: none; border-radius: 14px; padding: 6
 QListWidget::item {{ padding: 8px 10px; border-radius: 8px; }}
 QListWidget::item:hover {{ background: {RAISED}; }}
 QListWidget::item:selected {{ background: rgba(166, 255, 0, 0.14); color: {TEXT}; }}
+QListWidget#reps::item {{ padding: 0; }}
 QTableWidget {{
     background: {CARD}; border: none; border-radius: 12px; gridline-color: {SEPARATOR};
 }}

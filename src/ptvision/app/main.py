@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ptvision.app import theme
+from ptvision.app.cards import ResultColumn
 from ptvision.app.pages import TEST_NAMES, DropPage, ProgressPage
 from ptvision.app.panel import SidePanel
 from ptvision.app.player import Player
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
         self.timeline = AngleTimeline()
         self.timeline.hide()
         self.panel = SidePanel()
+        self.cards = ResultColumn()
         self.act_details = QAction("Details", self)
         self.act_details.setCheckable(True)
         self.act_details.setShortcut(QKeySequence("Ctrl+D"))
@@ -133,7 +135,6 @@ class MainWindow(QMainWindow):
         self.panel.angleToggled.connect(self._angle_toggled)
         self.panel.showOthersToggled.connect(self.view.skeleton.set_show_others)
         self.panel.smoothToggled.connect(self.view.skeleton.set_smooth)
-        self.panel.report_button.clicked.connect(self.open_report)
 
         self._build_actions()
         self.statusBar().showMessage("drop a video to begin")
@@ -192,6 +193,7 @@ class MainWindow(QMainWindow):
         left.addWidget(self.left_split, 1)
 
         self.side = QStackedWidget()
+        self.side.addWidget(self.cards)
         self.side.addWidget(self.panel)
         self.side.setFixedWidth(SIDE_WIDTH)
         row = QHBoxLayout(self.viewer)
@@ -204,13 +206,17 @@ class MainWindow(QMainWindow):
         self.transport.stepRequested.connect(self._step)
         self.transport.scrubbed.connect(self._scrub)
         self.transport.speedRequested.connect(self._cycle_speed)
+        self.cards.seekRequested.connect(self._scrub)
+        self.cards.report_button.clicked.connect(self.open_report)
 
     def set_details(self, on: bool) -> None:
-        """Details: the angle timeline (and, with the result cards, the settings panel)."""
+        """Details: the angle timeline under the video, and the settings panel in place of the
+        result cards."""
         if self.act_details.isChecked() != on:
             self.act_details.setChecked(on)  # re-enters through toggled
             return
         self.timeline.setVisible(on)
+        self.side.setCurrentWidget(self.panel if on else self.cards)
         if on:
             total = max(1, self.left_split.height())
             self.left_split.setSizes([round(total * 0.62), round(total * 0.38)])
@@ -483,6 +489,7 @@ class MainWindow(QMainWindow):
         )
         self.timeline.set_session(session)
         self.panel.set_session(session)
+        self.cards.set_session(session)
         self.transport.set_session(session)
         self.result_title.setText(result_title(session))
         self.result_subtitle.setText(result_subtitle(session))
@@ -498,7 +505,7 @@ class MainWindow(QMainWindow):
         self.drop_page.remember(trial_dir)
         has_report = self.report_path() is not None
         self.act_report.setEnabled(has_report)
-        self.panel.report_button.setVisible(has_report)
+        self.cards.report_button.setVisible(has_report)
 
     def close_trial(self) -> None:
         if self._player is not None:
@@ -508,6 +515,7 @@ class MainWindow(QMainWindow):
         self.view.set_session(None, None)
         self.timeline.set_session(None)
         self.panel.set_session(None)
+        self.cards.set_session(None)
         self.transport.set_session(None)
         self._session = None
         self.act_report.setEnabled(False)
@@ -555,6 +563,7 @@ class MainWindow(QMainWindow):
         if self.timeline.isVisible():
             self.timeline.set_frame(t)
         self.transport.set_frame(t)
+        self.cards.set_frame(t)
         values = s.angle_readout(t)
         self.panel.set_readout(values)
         self.view.set_angles(values)

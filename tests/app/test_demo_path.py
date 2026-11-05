@@ -108,8 +108,8 @@ def test_open_report_button_opens_the_run_report(qtbot, synthetic_trial, monkeyp
     qtbot.addWidget(w)
     w.show()
     w.open_trial(synthetic_trial.trial_dir)
-    assert w.act_report.isEnabled() and w.panel.report_button.isVisible()
-    w.panel.report_button.click()
+    assert w.act_report.isEnabled() and w.cards.report_button.isVisible()
+    w.cards.report_button.click()
     assert opened and opened[0].endswith("report.html") and Path(opened[0]).exists()
     w.close_trial()
     assert not w.act_report.isEnabled()
@@ -120,7 +120,7 @@ def test_pose_only_trial_has_no_report(qtbot, pose_only_trial) -> None:
     qtbot.addWidget(w)
     w.show()
     w.open_trial(pose_only_trial.trial_dir)
-    assert not w.act_report.isEnabled() and not w.panel.report_button.isVisible()
+    assert not w.act_report.isEnabled() and not w.cards.report_button.isVisible()
     assert w.open_report() is False
 
 

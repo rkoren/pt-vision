@@ -64,8 +64,8 @@ def test_arrow_keys_reach_player_regardless_of_focus(qtbot, synthetic_trial) -> 
     w.view.setFocus()
     qtbot.keyClick(w.view, Qt.Key.Key_Right)
     assert w.player.frame == 1
-    w.panel.events.setFocus()
-    qtbot.keyClick(w.panel.events, Qt.Key.Key_Right)
+    w.cards.reps.setFocus()  # a list would take the arrows for itself
+    qtbot.keyClick(w.cards.reps, Qt.Key.Key_Right)
     assert w.player.frame == 2
     qtbot.keyClick(w, Qt.Key.Key_Space)
     assert w.player.playing
@@ -260,6 +260,7 @@ def test_pose_only_hides_measurement_and_event_groups(
     w.show()
     w.open_trial(pose_only_trial.trial_dir)
     assert w.session is not None and w.session.protocol is None
+    w.set_details(True)  # the panel shows in place of the result cards
     assert not w.panel.metrics_box.isVisible() and not w.panel.events_box.isVisible()
     assert "pose only" in w.panel.quality.text()
     w.open_trial(synthetic_trial.trial_dir)

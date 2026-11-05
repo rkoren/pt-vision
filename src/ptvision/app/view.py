@@ -53,6 +53,7 @@ class AngleChips(QWidget):
             item = self._lay.takeAt(0)
             w = item.widget() if item is not None else None
             if w is not None:
+                w.setParent(None)  # off screen now, not at the next event loop
                 w.deleteLater()
         self.values = {}
         for name in names:
