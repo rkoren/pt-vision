@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QElapsedTimer, QObject, Qt, QTimer, Signal
 
+RATES = (1.0, 0.5, 0.25)  # normal, half and quarter speed (slow motion for a class)
+
 
 class Player(QObject):
     frameChanged = Signal(int)
     playingChanged = Signal(bool)
+    rateChanged = Signal(float)
 
     def __init__(self, n_frames: int, fps: float, parent: QObject | None = None):
         super().__init__(parent)
@@ -16,6 +19,7 @@ class Player(QObject):
         self._frame = 0
         self._playing = False
         self._base_frame = 0
+        self._rate = 1.0
         self._clock = QElapsedTimer()
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -33,6 +37,28 @@ class Player(QObject):
     @property
     def time_s(self) -> float:
         return self._frame / self.fps
+
+    @property
+    def rate(self) -> float:
+        return self._rate
+
+    def set_rate(self, rate: float) -> None:
+        """Playback speed as a fraction of real time. Changing it mid-play continues from the
+        current frame instead of jumping."""
+        rate = float(rate)
+        if rate <= 0 or rate == self._rate:
+            return
+        self._rate = rate
+        if self._playing:
+            self._base_frame = self._frame
+            self._clock.restart()
+        self.rateChanged.emit(rate)
+
+    def cycle_rate(self) -> float:
+        """1× → ½× → ¼× → 1×."""
+        i = RATES.index(self._rate) if self._rate in RATES else -1
+        self.set_rate(RATES[(i + 1) % len(RATES)])
+        return self._rate
 
     def _set_frame(self, i: int) -> None:
         i = max(0, min(self.n_frames - 1, int(i)))
@@ -75,7 +101,7 @@ class Player(QObject):
             self.play()
 
     def _tick(self) -> None:
-        target = self._base_frame + int(self._clock.elapsed() * self.fps / 1000.0)
+        target = self._base_frame + int(self._clock.elapsed() * self.fps * self._rate / 1000.0)
         if target >= self.n_frames - 1:
             self._set_frame(self.n_frames - 1)
             self.pause()

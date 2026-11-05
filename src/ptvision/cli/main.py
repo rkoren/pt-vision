@@ -478,14 +478,14 @@ def app_cmd(
         typer.Argument(exists=True, help="Video to process, or a trial folder to open."),
     ] = None,
     protocol: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--protocol",
             "-p",
             help="pose (skeleton only), a built-in protocol id (see `ptv protocols list`), "
-            "or a TOML path",
+            "or a TOML path. Default: the last one chosen in the app (sts_5x at first).",
         ),
-    ] = "pose",
+    ] = None,
     out: Annotated[
         Path | None, typer.Option("--out", "-o", help="Output trial directory for a video.")
     ] = None,

@@ -22,6 +22,7 @@ from ptvision.viz.status import BoneStatus, Mode, Rule
 
 PhaseKind = Literal["rise", "stand", "descent"]
 DEFAULT_ANGLES = ["knee_flexion", "hip_flexion", "trunk_lean"]
+_PHASE_WORDS = {"rise": "rising", "stand": "standing", "descent": "sitting"}
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,50 @@ class TrialSession:
             return None
         done = sum(1 for f in starts if f <= t)
         return (done, len(starts)) if done else None
+
+    def phase_at(self, t: int) -> PhaseKind | None:
+        for ph in self.phases:
+            if ph.start <= t < ph.end:
+                return ph.kind
+        return None
+
+    def rep_label(self, t: int) -> str | None:
+        """The video badge: "Rep 3 of 5 · rising", "Before the test" until the first seat-off,
+        or None when the run found no repetitions (pose only, or nothing detected)."""
+        if not any(m.label == "seat-off" and m.rep is not None for m in self.events):
+            return None
+        rep = self.rep_at(t)
+        if rep is None:
+            return "Before the test"
+        word = _PHASE_WORDS.get(self.phase_at(t) or "", "seated")
+        return f"Rep {rep[0]} of {rep[1]} · {word}"
+
+    def test_clock(self, t: int) -> float | None:
+        """Seconds into the timed test at frame t: 0 before it starts, frozen once it ends, so the
+        last frame reads exactly the total time. None when the run has no timed window."""
+        if self.test_window is None:
+            return None
+        start, end = self.test_window
+        return (min(max(int(t), start), end) - start) / self.fps
+
+    @property
+    def primary_metric(self) -> Metric | None:
+        """The protocol's headline measurement (the 5xSTS time, the 30-s stand count)."""
+        spec = self.protocol.primary_metric() if self.protocol is not None else None
+        if spec is None:
+            return None
+        return next((m for m in self.metrics if m.name == spec.name), None)
+
+    @property
+    def primary_norm(self) -> NormComparison | None:
+        m = self.primary_metric
+        if m is None:
+            return None
+        return next((n for n in self.norms if n.metric == m.name), None)
+
+    def rise_times(self) -> list[float]:
+        """Seconds from seat-off to standing for each repetition, in order."""
+        return [(ph.end - ph.start) / self.fps for ph in self.phases if ph.kind == "rise"]
 
     def default_angle_names(self) -> list[str]:
         wanted = self.protocol.report.angles if self.protocol else DEFAULT_ANGLES

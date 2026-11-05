@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
+    QDesktopServices,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDropEvent,
     QKeyEvent,
     QKeySequence,
@@ -19,20 +22,26 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
     QSplitter,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ptvision.app.pages import DropPage, ProgressPage
+from ptvision.app import theme
+from ptvision.app.cards import ResultColumn
+from ptvision.app.pages import TEST_NAMES, DropPage, ProgressPage
 from ptvision.app.panel import SidePanel
 from ptvision.app.player import Player
 from ptvision.app.session import TrialSession
+from ptvision.app.theme import apply_theme
 from ptvision.app.timeline import AngleTimeline
+from ptvision.app.transport import TransportBar
 from ptvision.app.view import VideoView
 from ptvision.app.worker import JobSpec, PipelineWorker, WorkerResult
 from ptvision.pose.base import PoseBackend
@@ -40,12 +49,38 @@ from ptvision.trials.models import Subject
 from ptvision.video import FrameSource
 from ptvision.viz import status as vs
 
+SIDE_WIDTH = 440  # the right-hand column of the result view
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mts", ".3gp"}
 BackendFactory = Callable[[], PoseBackend | None]
 
 
 def _is_trial_dir(p: Path) -> bool:
     return p.is_dir() and (p / "capture.json").exists()
+
+
+def friendly_failure(message: str) -> tuple[str, str]:
+    """A title and a next step for a failed job, in words for whoever is at the laptop."""
+    if "no person detected" in message.lower():
+        return (
+            "No one was found in the video",
+            "Film again with the whole body, both feet and the chair in view.",
+        )
+    return "The video could not be processed", message
+
+
+def result_title(session: TrialSession) -> str:
+    if session.protocol is None:
+        return TEST_NAMES["pose"]
+    meta = session.protocol.protocol
+    return TEST_NAMES.get(meta.id, meta.name)
+
+
+def result_subtitle(session: TrialSession) -> str:
+    parts = [session.trial.path.name]
+    age = session.capture.subject.age_years
+    if age is not None:
+        parts.append(f"Age {age}")
+    return " · ".join(parts)
 
 
 class MainWindow(QMainWindow):
@@ -59,7 +94,9 @@ class MainWindow(QMainWindow):
         self._session: TrialSession | None = None
         self._player: Player | None = None
         self._job_out: Path | None = None
-        self.screenshot_mode = False  # headless capture: never block on modal dialogs
+        self._job_source: Path | None = None
+        self._show_clock = False
+        self.screenshot_mode = False  # headless capture
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -70,23 +107,20 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.progress_page)
         self.stack.addWidget(self.viewer)
 
-        # viewer layout
+        # viewer: a header, the video with its overlays and transport, the panel on the right;
+        # Details adds the angle timeline under the video
         self.view = VideoView()
+        self.transport = TransportBar()
         self.timeline = AngleTimeline()
+        self.timeline.hide()
         self.panel = SidePanel()
-        left = QSplitter(Qt.Orientation.Vertical)
-        left.addWidget(self.view)
-        left.addWidget(self.timeline)
-        left.setStretchFactor(0, 3)
-        left.setStretchFactor(1, 2)
-        split = QSplitter(Qt.Orientation.Horizontal)
-        split.addWidget(left)
-        split.addWidget(self.panel)
-        split.setStretchFactor(0, 4)
-        split.setStretchFactor(1, 1)
-        vl = QVBoxLayout(self.viewer)
-        vl.setContentsMargins(0, 0, 0, 0)
-        vl.addWidget(split)
+        self.cards = ResultColumn()
+        self.act_details = QAction("Details", self)
+        self.act_details.setCheckable(True)
+        self.act_details.setShortcut(QKeySequence("Ctrl+D"))
+        self.act_details.setToolTip("Angle timeline and display settings (⌘D)")
+        self.act_details.toggled.connect(self.set_details)
+        self._build_viewer()
 
         self.drop_page.open_video.clicked.connect(self._choose_video)
         self.drop_page.open_trial.clicked.connect(self._choose_trial)
@@ -110,6 +144,84 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
+
+    def _build_viewer(self) -> None:
+        self.new_test_button = QToolButton()
+        self.new_test_button.setText("‹  New test")
+        self.new_test_button.setToolTip("Back to the start page (⌘W)")
+        self.new_test_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.new_test_button.clicked.connect(self.close_trial)
+        self.details_button = QToolButton()
+        self.details_button.setDefaultAction(self.act_details)
+        self.details_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.result_title = QLabel()
+        theme.set_role(self.result_title, "headline")
+        self.result_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.result_subtitle = QLabel()
+        theme.set_role(self.result_subtitle, "caption")
+        self.result_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        titles.addWidget(self.result_title)
+        titles.addWidget(self.result_subtitle)
+        header = QHBoxLayout()
+        header.addWidget(self.new_test_button)
+        header.addStretch(1)
+        header.addLayout(titles)
+        header.addStretch(1)
+        header.addWidget(self.details_button)
+        # the two ends share a width, so the title centres over the video
+        width = max(self.new_test_button.sizeHint().width(), 110)
+        self.new_test_button.setMinimumWidth(width)
+        self.details_button.setMinimumWidth(width)
+
+        video = QWidget()
+        vb = QVBoxLayout(video)
+        vb.setContentsMargins(0, 0, 0, 0)
+        vb.setSpacing(10)
+        vb.addWidget(self.view, 1)
+        vb.addWidget(self.transport)
+        self.left_split = QSplitter(Qt.Orientation.Vertical)
+        self.left_split.setChildrenCollapsible(False)
+        self.left_split.addWidget(video)
+        self.left_split.addWidget(self.timeline)
+        self.left_split.setStretchFactor(0, 3)
+        self.left_split.setStretchFactor(1, 2)
+        left = QVBoxLayout()
+        left.setSpacing(10)
+        left.addLayout(header)
+        left.addWidget(self.left_split, 1)
+
+        self.side = QStackedWidget()
+        self.side.addWidget(self.cards)
+        self.side.addWidget(self.panel)
+        self.side.setFixedWidth(SIDE_WIDTH)
+        row = QHBoxLayout(self.viewer)
+        row.setContentsMargins(16, 10, 16, 16)
+        row.setSpacing(16)
+        row.addLayout(left, 1)
+        row.addWidget(self.side)
+
+        self.transport.playToggled.connect(self._toggle_play)
+        self.transport.stepRequested.connect(self._step)
+        self.transport.scrubbed.connect(self._scrub)
+        self.transport.speedRequested.connect(self._cycle_speed)
+        self.cards.seekRequested.connect(self._scrub)
+        self.cards.report_button.clicked.connect(self.open_report)
+
+    def set_details(self, on: bool) -> None:
+        """Details: the angle timeline under the video, and the settings panel in place of the
+        result cards."""
+        if self.act_details.isChecked() != on:
+            self.act_details.setChecked(on)  # re-enters through toggled
+            return
+        self.timeline.setVisible(on)
+        self.side.setCurrentWidget(self.panel if on else self.cards)
+        if on:
+            total = max(1, self.left_split.height())
+            self.left_split.setSizes([round(total * 0.62), round(total * 0.38)])
+            if self._player is not None:
+                self.timeline.set_frame(self._player.frame)
 
     _KEY_COMMANDS: dict[tuple[int, bool], str] = {
         (int(Qt.Key.Key_Space), False): "toggle",
@@ -168,7 +280,23 @@ class MainWindow(QMainWindow):
         act_close = QAction("Close trial", self)
         act_close.setShortcut(QKeySequence("Ctrl+W"))
         act_close.triggered.connect(self.close_trial)
+        self.act_report = QAction("Open report", self)
+        self.act_report.setShortcut(QKeySequence("Ctrl+R"))
+        self.act_report.triggered.connect(self.open_report)
+        self.act_report.setEnabled(False)
         file_menu.addActions([act_open, act_trial, act_close])
+        file_menu.addSeparator()
+        file_menu.addAction(self.act_report)
+
+        # "Window", not "View": macOS adds its own Enter Full Screen item to a menu titled View
+        window_menu = self.menuBar().addMenu("&Window")
+        self.act_fullscreen = QAction("Full screen", self)
+        self.act_fullscreen.setShortcuts(
+            [*QKeySequence.keyBindings(QKeySequence.StandardKey.FullScreen), QKeySequence("F11")]
+        )
+        self.act_fullscreen.triggered.connect(self.toggle_full_screen)
+        window_menu.addAction(self.act_fullscreen)
+        window_menu.addAction(self.act_details)
 
         pb = self.menuBar().addMenu("&Playback")
 
@@ -187,6 +315,7 @@ class MainWindow(QMainWindow):
         self.act_next10 = add("Forward 10 frames", ["Shift+Right"], lambda: self._step(10))
         self.act_first = add("First frame", ["Home", "Ctrl+Left"], lambda: self._seek(0))
         self.act_last = add("Last frame", ["End", "Ctrl+Right"], self._seek_last)
+        self.act_speed = add("Playback speed (1×, ½×, ¼×)", ["S"], self._cycle_speed)
         pb.addSeparator()
         self.act_fit = add("Fit to window", ["F"], self.view.fit)
         self.act_mode = add("Toggle colour mode", ["C"], self._toggle_mode)
@@ -195,8 +324,14 @@ class MainWindow(QMainWindow):
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
+            self.drop_page.set_drag_active(True)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self.drop_page.set_drag_active(False)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:
+        self.drop_page.set_drag_active(False)
         paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
         if paths:
             event.acceptProposedAction()
@@ -210,9 +345,19 @@ class MainWindow(QMainWindow):
             if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES:
                 self.open_path(p, protocol=protocol)
                 return
-        QMessageBox.warning(
-            self, "ptvision", "Drop a video file or a trial folder (with capture.json)."
+        self.notify(
+            "That isn't a video",
+            "Drop a video file (.mov, .mp4) or a folder from a previous run.",
+            level="warn",
         )
+
+    def notify(self, title: str, body: str = "", *, details: str = "", level: str = "fail") -> None:
+        """Inline, never modal: a card on the drop page, else the status bar (a card written while
+        the progress page or the viewer shows would surface later, stale)."""
+        if self.stack.currentWidget() is not self.drop_page:
+            self.statusBar().showMessage(f"{title}. {body}".strip(), 10000)
+            return
+        self.drop_page.notice.show_message(title, body, details=details, level=level)
 
     def open_path(
         self,
@@ -253,8 +398,13 @@ class MainWindow(QMainWindow):
         self.open_path(smp.path, protocol=smp.protocol, out_dir=Path("ptv_out") / "sample")
 
     def _choose_video(self) -> None:
+        # Downloads first: AirDrop puts the clip there
+        start = Path.home() / "Downloads"
         f, _ = QFileDialog.getOpenFileName(
-            self, "Open video", "", "Videos (*.mp4 *.mov *.m4v *.avi *.mkv *.webm)"
+            self,
+            "Open video",
+            str(start) if start.is_dir() else "",
+            "Videos (*.mp4 *.mov *.m4v *.avi *.mkv *.webm)",
         )
         if f:
             self.open_path(Path(f))
@@ -267,9 +417,17 @@ class MainWindow(QMainWindow):
     # ---- jobs -------------------------------------------------------------------------
     def start_job(self, spec: JobSpec) -> None:
         if self._worker is not None and self._worker.isRunning():
-            QMessageBox.information(self, "ptvision", "A job is already running.")
+            if self._job_source is not None and self._job_source.resolve() == spec.source.resolve():
+                return  # the same video again (dropped twice, or dropped and auto-detected)
+            self.statusBar().showMessage(
+                f"Still processing {self._job_source.name if self._job_source else 'a video'}; "
+                f"drop {spec.source.name} again when it finishes.",
+                10000,
+            )
             return
         self.close_trial()
+        self.drop_page.notice.clear()
+        self._job_source = spec.source
         backend = self._backend_factory() if self._backend_factory else None
         self._worker = PipelineWorker(spec, backend=backend, parent=self)
         self._worker.progress.connect(self.progress_page.set_progress)
@@ -280,8 +438,7 @@ class MainWindow(QMainWindow):
         self._worker.failed.connect(self._job_failed)
         self._worker.cancelled.connect(self._job_cancelled)
         self._worker.finished.connect(self._worker.deleteLater)
-        self.progress_page.file.setText(str(spec.source))
-        self.progress_page.set_stage("starting")
+        self.progress_page.set_job(spec.source, spec.protocol)
         self.stack.setCurrentWidget(self.progress_page)
         self.statusBar().showMessage(f"processing {spec.source.name}")
         self._worker.start()
@@ -293,23 +450,20 @@ class MainWindow(QMainWindow):
 
     def _job_done(self, result: WorkerResult) -> None:
         self._worker = None
+        self._job_source = None
         self.open_trial(result.trial_dir, run_id=result.run_id)
 
     def _job_failed(self, message: str, tb: str) -> None:
         self._worker = None
+        self._job_source = None
         self.stack.setCurrentWidget(self.drop_page)
         self.statusBar().showMessage(f"failed: {message}")
-        if self.screenshot_mode:
-            return
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Critical)
-        box.setWindowTitle("ptvision")
-        box.setText(f"Processing failed:\n{message}")
-        box.setDetailedText(tb)
-        box.exec()
+        title, body = friendly_failure(message)
+        self.notify(title, body, details=tb)
 
     def _job_cancelled(self) -> None:
         self._worker = None
+        self._job_source = None
         self.stack.setCurrentWidget(self.drop_page)
         self.statusBar().showMessage("cancelled")
 
@@ -319,17 +473,26 @@ class MainWindow(QMainWindow):
             session = TrialSession.load(trial_dir, run_id)
             source = FrameSource(session.video_path)
         except Exception as e:
-            QMessageBox.critical(self, "ptvision", f"Could not open trial:\n{e}")
             self.stack.setCurrentWidget(self.drop_page)
+            self.notify("Couldn't open that trial", str(e), details=traceback.format_exc())
             return
         self.close_trial()
         self._session = session
         self._player = Player(session.n_frames, session.fps, self)
         self._player.frameChanged.connect(self._on_frame)
         self._player.playingChanged.connect(self._on_playing)
+        self._player.rateChanged.connect(self.transport.set_rate)
         self.view.set_session(session, source)
+        self.view.set_angle_names(session.default_angle_names())
+        self._show_clock = session.test_window is not None and (
+            session.primary_metric is not None and session.primary_metric.units == "s"
+        )
         self.timeline.set_session(session)
         self.panel.set_session(session)
+        self.cards.set_session(session)
+        self.transport.set_session(session)
+        self.result_title.setText(result_title(session))
+        self.result_subtitle.setText(result_subtitle(session))
         self.setWindowTitle(f"ptvision — {session.title}")
         self.stack.setCurrentWidget(self.viewer)
         self.view.setFocus()
@@ -340,6 +503,9 @@ class MainWindow(QMainWindow):
             self._on_frame(0)
         QTimer.singleShot(0, self.view.fit)
         self.drop_page.remember(trial_dir)
+        has_report = self.report_path() is not None
+        self.act_report.setEnabled(has_report)
+        self.cards.report_button.setVisible(has_report)
 
     def close_trial(self) -> None:
         if self._player is not None:
@@ -349,10 +515,33 @@ class MainWindow(QMainWindow):
         self.view.set_session(None, None)
         self.timeline.set_session(None)
         self.panel.set_session(None)
+        self.cards.set_session(None)
+        self.transport.set_session(None)
         self._session = None
+        self.act_report.setEnabled(False)
         self.setWindowTitle("ptvision")
         if self.stack.currentWidget() is self.viewer:
             self.stack.setCurrentWidget(self.drop_page)
+
+    def report_path(self) -> Path | None:
+        s = self._session
+        if s is None or s.run is None:
+            return None
+        path = s.run.path / "report.html"
+        return path.resolve() if path.exists() else None
+
+    def open_report(self) -> bool:
+        path = self.report_path()
+        if path is None:
+            self.statusBar().showMessage("No report for this trial (skeleton-only runs have none)")
+            return False
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def toggle_full_screen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
 
     @property
     def job_running(self) -> bool:
@@ -371,16 +560,32 @@ class MainWindow(QMainWindow):
         if s is None:
             return
         self.view.show_frame(t)
-        self.timeline.set_frame(t)
+        if self.timeline.isVisible():
+            self.timeline.set_frame(t)
+        self.transport.set_frame(t)
+        self.cards.set_frame(t)
         values = s.angle_readout(t)
         self.panel.set_readout(values)
-        rep = s.rep_at(t)
-        self.view.set_badge(f"Rep {rep[0]} / {rep[1]}" if rep else None)
+        self.view.set_angles(values)
+        self.view.set_badge(s.rep_label(t))
+        clock = s.test_clock(t) if self._show_clock else None
+        done = s.test_window is not None and t >= s.test_window[1]
+        self.view.set_clock(clock, done=done)
         readout = "  ".join(f"{k.replace('_', ' ')} {v:.0f}°" for k, v in values.items())
         self.statusBar().showMessage(f"frame {t}/{s.n_frames - 1}   {t / s.fps:.2f} s   {readout}")
 
     def _on_playing(self, playing: bool) -> None:
         self.act_play.setText("Pause" if playing else "Play")
+        self.transport.set_playing(playing)
+
+    def _scrub(self, t: int) -> None:
+        if self._player is not None:
+            self._player.pause()
+            self._player.seek(int(t))
+
+    def _cycle_speed(self) -> None:
+        if self._player is not None:
+            self._player.cycle_rate()
 
     def _seek(self, t: int) -> None:
         if self._player is not None:
@@ -434,7 +639,7 @@ class MainWindow(QMainWindow):
 def main(
     source: Path | None = None,
     *,
-    protocol: str = "pose",
+    protocol: str | None = None,
     out_dir: Path | None = None,
     run_id: str | None = None,
     subject: Subject | None = None,
@@ -443,6 +648,8 @@ def main(
 ) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("ptvision")
+    if isinstance(app, QApplication):
+        apply_theme(app)
     win = MainWindow()
     if subject is not None:
         win.drop_page.set_subject(height_m=subject.height_m, age=subject.age_years, sex=subject.sex)
@@ -450,9 +657,10 @@ def main(
         win.drop_page.max_height_box.setCurrentIndex(
             max(0, win.drop_page.max_height_box.findData(int(max_height)))
         )
+    if protocol:
+        win.drop_page.select_protocol(protocol)  # a built-in id; a TOML path still runs below
     win.show()
     if source is not None:
-        win.drop_page.select_protocol(protocol)
         win.open_path(Path(source), protocol=protocol, run_id=run_id, out_dir=out_dir)
     shot = os.environ.get("PTV_APP_SCREENSHOT")
     if shot:

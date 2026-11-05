@@ -6,12 +6,15 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 
+from ptvision.app import theme
 from ptvision.app.session import TrialSession
+from ptvision.app.view import CHIP_NAMES
 
+# the iPhone chart's fills: rising blue, standing grey, sitting orange
 PHASE_COLORS = {
-    "rise": (200, 230, 201, 110),
-    "stand": (227, 242, 253, 110),
-    "descent": (255, 224, 178, 110),
+    "rise": (64, 140, 255, 72),
+    "stand": (99, 99, 102, 72),
+    "descent": (255, 153, 51, 72),
 }
 
 
@@ -20,7 +23,7 @@ class AngleTimeline(pg.GraphicsLayoutWidget):  # type: ignore[misc]
 
     def __init__(self, parent=None) -> None:  # type: ignore[no-untyped-def]
         super().__init__(parent)
-        self.setBackground("#1a1b1e")
+        self.setBackground(theme.CARD)
         self._session: TrialSession | None = None
         self._names: list[str] = []
         self._plots: list[pg.PlotItem] = []
@@ -58,8 +61,12 @@ class AngleTimeline(pg.GraphicsLayoutWidget):  # type: ignore[misc]
             plot.setMenuEnabled(False)
             plot.setMouseEnabled(x=True, y=False)
             plot.hideButtons()
-            plot.setLabel("left", name.replace("_", " "), units="°")
+            # short names: the stacked plots' rotated labels overlap when the panel is short
+            plot.setLabel("left", CHIP_NAMES.get(name, name.replace("_", " ")), units="°")
             plot.showGrid(x=False, y=True, alpha=0.15)
+            for axis in ("left", "bottom"):
+                plot.getAxis(axis).setPen(pg.mkPen(theme.SEPARATOR))
+                plot.getAxis(axis).setTextPen(pg.mkPen(theme.TEXT_2))
             if first is None:
                 first = plot
             else:
@@ -94,13 +101,13 @@ class AngleTimeline(pg.GraphicsLayoutWidget):  # type: ignore[misc]
                         )
                     )
             values = s.angles[name]
-            plot.plot(t, values, pen=pg.mkPen("#7fb3ff", width=1.6))
+            plot.plot(t, values, pen=pg.mkPen(theme.ACCENT, width=2))
             cursor = pg.InfiniteLine(
                 pos=self._frame / s.fps,
                 angle=90,
                 movable=True,
-                pen=pg.mkPen("#ffd166", width=2),
-                hoverPen=pg.mkPen("#ffe08a", width=3),
+                pen=pg.mkPen(theme.TEXT, width=2),
+                hoverPen=pg.mkPen(theme.ACCENT, width=3),
             )
             cursor.setZValue(50)
             cursor.sigDragged.connect(self._on_cursor_dragged)

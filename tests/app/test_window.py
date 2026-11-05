@@ -64,8 +64,8 @@ def test_arrow_keys_reach_player_regardless_of_focus(qtbot, synthetic_trial) -> 
     w.view.setFocus()
     qtbot.keyClick(w.view, Qt.Key.Key_Right)
     assert w.player.frame == 1
-    w.panel.events.setFocus()
-    qtbot.keyClick(w.panel.events, Qt.Key.Key_Right)
+    w.cards.reps.setFocus()  # a list would take the arrows for itself
+    qtbot.keyClick(w.cards.reps, Qt.Key.Key_Right)
     assert w.player.frame == 2
     qtbot.keyClick(w, Qt.Key.Key_Space)
     assert w.player.playing
@@ -260,6 +260,7 @@ def test_pose_only_hides_measurement_and_event_groups(
     w.show()
     w.open_trial(pose_only_trial.trial_dir)
     assert w.session is not None and w.session.protocol is None
+    w.set_details(True)  # the panel shows in place of the result cards
     assert not w.panel.metrics_box.isVisible() and not w.panel.events_box.isVisible()
     assert "pose only" in w.panel.quality.text()
     w.open_trial(synthetic_trial.trial_dir)
@@ -290,12 +291,12 @@ def test_recent_trials_list_remembers_opened_trial(qtbot, synthetic_trial, monke
     qtbot.addWidget(w)
     w.show()
     w.open_trial(synthetic_trial.trial_dir)
-    assert w.drop_page.recent_paths()[0] == synthetic_trial.trial_dir
+    assert w.drop_page.recent_paths()[0] == synthetic_trial.trial_dir.resolve()
     w2 = MainWindow()  # a new window sees it (same isolated settings store)
     qtbot.addWidget(w2)
     w2.show()
     assert w2.drop_page.recent.count() >= 1  # the settings store is shared across tests
-    assert w2.drop_page.recent_paths()[0] == synthetic_trial.trial_dir
+    assert w2.drop_page.recent_paths()[0] == synthetic_trial.trial_dir.resolve()
     w2.drop_page.recent.itemActivated.emit(w2.drop_page.recent.item(0))
     assert w2.stack.currentWidget() is w2.viewer
 
@@ -309,8 +310,8 @@ def test_rep_badge_and_angle_readout_follow_the_playhead(qtbot, synthetic_trial)
     assert s is not None
     starts = sorted(m.frame for m in s.events if m.label == "seat-off")
     w.player.seek(max(0, starts[0] - 3))
-    assert not w.view.badge.isVisible()
+    assert w.view.badge.text() == "Before the test"
     w.player.seek(starts[1] + 1)
-    assert w.view.badge.text() == f"Rep 2 / {len(starts)}"
+    assert w.view.badge.text() == f"Rep 2 of {len(starts)} · rising"
     assert "knee_flexion" in w.panel._readout_values
     assert w.panel._readout_values["knee_flexion"].text().endswith("°")
