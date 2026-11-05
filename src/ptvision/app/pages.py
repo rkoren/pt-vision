@@ -36,7 +36,7 @@ DEFAULT_PROTOCOL = "sts_5x"
 POSE_ONLY = "pose"
 
 # short names for the test picker; other protocols show their TOML name
-_TEST_NAMES = {
+TEST_NAMES = {
     "sts_5x": "Five-times sit-to-stand",
     "sts_30s": "30-second chair stand",
     POSE_ONLY: "Skeleton only",
@@ -315,8 +315,8 @@ class DropPage(QWidget):
 
     @staticmethod
     def _test_name(pid: str) -> str:
-        if pid in _TEST_NAMES:
-            return _TEST_NAMES[pid]
+        if pid in TEST_NAMES:
+            return TEST_NAMES[pid]
         try:
             return load_protocol(pid).protocol.name
         except Exception:

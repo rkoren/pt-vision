@@ -46,6 +46,17 @@ QLabel#badge {{
     background: rgba(28, 28, 30, 200); color: {TEXT}; font-weight: 600;
     padding: 5px 12px; border-radius: 13px;
 }}
+QFrame#chip {{ background: rgba(28, 28, 30, 200); border-radius: 10px; }}
+QLabel#clock {{
+    background: rgba(28, 28, 30, 200); color: {TEXT}; padding: 2px 14px; border-radius: 14px;
+}}
+QLabel#clock[done="true"] {{ color: {ACCENT}; }}
+QFrame#transport {{ background: {CARD}; border-radius: 18px; }}
+QPushButton#round {{ border-radius: 20px; padding: 0; min-width: 40px; min-height: 40px; }}
+QPushButton#play {{ border-radius: 24px; padding: 0; min-width: 48px; min-height: 48px; }}
+QPushButton#flat {{ background: transparent; color: {ACCENT}; padding: 6px 4px; }}
+QPushButton#flat:hover {{ color: #B8FF33; }}
+QPushButton#flat:checked {{ color: {TEXT}; }}
 QLabel[role="title"] {{ font-size: 30px; font-weight: 700; }}
 QLabel[role="headline"] {{ font-size: 20px; font-weight: 700; }}
 QLabel[role="section"] {{ color: {TEXT_2}; font-size: 12px; font-weight: 600; }}
@@ -61,7 +72,12 @@ QPushButton:disabled {{ color: {TEXT_3}; }}
 QPushButton[prominent="true"] {{ background: {ACCENT}; color: #000000; }}
 QPushButton[prominent="true"]:hover {{ background: #B8FF33; }}
 QPushButton[prominent="true"]:pressed {{ background: #8FDB00; }}
-QToolButton {{ background: transparent; color: {ACCENT}; border: none; font-weight: 600; }}
+QToolButton {{
+    background: transparent; color: {ACCENT}; border: none; font-weight: 600;
+    padding: 5px 12px; border-radius: 15px;
+}}
+QToolButton:hover {{ background: {CARD}; }}
+QToolButton:checked {{ background: {RAISED}; color: {TEXT}; }}
 QComboBox, QLineEdit {{
     background: {RAISED}; border: none; border-radius: 8px; padding: 6px 10px;
     selection-background-color: {ACCENT}; selection-color: #000000;
@@ -136,6 +152,23 @@ def apply_theme(app: QApplication) -> None:
     font.setPointSize(BASE_POINT_SIZE)
     app.setFont(font)
     app.setStyleSheet(QSS)
+
+
+def number_font(base: QFont, px: int, *, bold: bool = True) -> QFont:
+    """A font for numbers that change while you watch: fixed-width digits, so they don't jitter.
+    Set in code, not the stylesheet, which would drop the digit feature."""
+    f = QFont(base)
+    f.setPixelSize(px)
+    f.setBold(bold)
+    f.setFeature(QFont.Tag("tnum"), 1)
+    return f
+
+
+def repolish(widget: QWidget) -> None:
+    """Re-apply the stylesheet after a dynamic property changes."""
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
 
 
 def set_role(widget: QWidget, role: str) -> None:

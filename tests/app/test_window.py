@@ -309,8 +309,8 @@ def test_rep_badge_and_angle_readout_follow_the_playhead(qtbot, synthetic_trial)
     assert s is not None
     starts = sorted(m.frame for m in s.events if m.label == "seat-off")
     w.player.seek(max(0, starts[0] - 3))
-    assert not w.view.badge.isVisible()
+    assert w.view.badge.text() == "Before the test"
     w.player.seek(starts[1] + 1)
-    assert w.view.badge.text() == f"Rep 2 / {len(starts)}"
+    assert w.view.badge.text() == f"Rep 2 of {len(starts)} · rising"
     assert "knee_flexion" in w.panel._readout_values
     assert w.panel._readout_values["knee_flexion"].text().endswith("°")

@@ -22,20 +22,25 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMainWindow,
     QSplitter,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ptvision.app.pages import DropPage, ProgressPage
+from ptvision.app import theme
+from ptvision.app.pages import TEST_NAMES, DropPage, ProgressPage
 from ptvision.app.panel import SidePanel
 from ptvision.app.player import Player
 from ptvision.app.session import TrialSession
 from ptvision.app.theme import apply_theme
 from ptvision.app.timeline import AngleTimeline
+from ptvision.app.transport import TransportBar
 from ptvision.app.view import VideoView
 from ptvision.app.worker import JobSpec, PipelineWorker, WorkerResult
 from ptvision.pose.base import PoseBackend
@@ -43,6 +48,7 @@ from ptvision.trials.models import Subject
 from ptvision.video import FrameSource
 from ptvision.viz import status as vs
 
+SIDE_WIDTH = 440  # the right-hand column of the result view
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mts", ".3gp"}
 BackendFactory = Callable[[], PoseBackend | None]
 
@@ -61,6 +67,21 @@ def friendly_failure(message: str) -> tuple[str, str]:
     return "The video could not be processed", message
 
 
+def result_title(session: TrialSession) -> str:
+    if session.protocol is None:
+        return TEST_NAMES["pose"]
+    meta = session.protocol.protocol
+    return TEST_NAMES.get(meta.id, meta.name)
+
+
+def result_subtitle(session: TrialSession) -> str:
+    parts = [session.trial.path.name]
+    age = session.capture.subject.age_years
+    if age is not None:
+        parts.append(f"Age {age}")
+    return " · ".join(parts)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, *, backend_factory: BackendFactory | None = None) -> None:
         super().__init__()
@@ -73,6 +94,7 @@ class MainWindow(QMainWindow):
         self._player: Player | None = None
         self._job_out: Path | None = None
         self._job_source: Path | None = None
+        self._show_clock = False
         self.screenshot_mode = False  # headless capture
 
         self.stack = QStackedWidget()
@@ -84,23 +106,19 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.progress_page)
         self.stack.addWidget(self.viewer)
 
-        # viewer layout
+        # viewer: a header, the video with its overlays and transport, the panel on the right;
+        # Details adds the angle timeline under the video
         self.view = VideoView()
+        self.transport = TransportBar()
         self.timeline = AngleTimeline()
+        self.timeline.hide()
         self.panel = SidePanel()
-        left = QSplitter(Qt.Orientation.Vertical)
-        left.addWidget(self.view)
-        left.addWidget(self.timeline)
-        left.setStretchFactor(0, 3)
-        left.setStretchFactor(1, 2)
-        split = QSplitter(Qt.Orientation.Horizontal)
-        split.addWidget(left)
-        split.addWidget(self.panel)
-        split.setStretchFactor(0, 4)
-        split.setStretchFactor(1, 1)
-        vl = QVBoxLayout(self.viewer)
-        vl.setContentsMargins(0, 0, 0, 0)
-        vl.addWidget(split)
+        self.act_details = QAction("Details", self)
+        self.act_details.setCheckable(True)
+        self.act_details.setShortcut(QKeySequence("Ctrl+D"))
+        self.act_details.setToolTip("Angle timeline and display settings (⌘D)")
+        self.act_details.toggled.connect(self.set_details)
+        self._build_viewer()
 
         self.drop_page.open_video.clicked.connect(self._choose_video)
         self.drop_page.open_trial.clicked.connect(self._choose_trial)
@@ -125,6 +143,79 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
+
+    def _build_viewer(self) -> None:
+        self.new_test_button = QToolButton()
+        self.new_test_button.setText("‹  New test")
+        self.new_test_button.setToolTip("Back to the start page (⌘W)")
+        self.new_test_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.new_test_button.clicked.connect(self.close_trial)
+        self.details_button = QToolButton()
+        self.details_button.setDefaultAction(self.act_details)
+        self.details_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.result_title = QLabel()
+        theme.set_role(self.result_title, "headline")
+        self.result_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.result_subtitle = QLabel()
+        theme.set_role(self.result_subtitle, "caption")
+        self.result_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        titles.addWidget(self.result_title)
+        titles.addWidget(self.result_subtitle)
+        header = QHBoxLayout()
+        header.addWidget(self.new_test_button)
+        header.addStretch(1)
+        header.addLayout(titles)
+        header.addStretch(1)
+        header.addWidget(self.details_button)
+        # the two ends share a width, so the title centres over the video
+        width = max(self.new_test_button.sizeHint().width(), 110)
+        self.new_test_button.setMinimumWidth(width)
+        self.details_button.setMinimumWidth(width)
+
+        video = QWidget()
+        vb = QVBoxLayout(video)
+        vb.setContentsMargins(0, 0, 0, 0)
+        vb.setSpacing(10)
+        vb.addWidget(self.view, 1)
+        vb.addWidget(self.transport)
+        self.left_split = QSplitter(Qt.Orientation.Vertical)
+        self.left_split.setChildrenCollapsible(False)
+        self.left_split.addWidget(video)
+        self.left_split.addWidget(self.timeline)
+        self.left_split.setStretchFactor(0, 3)
+        self.left_split.setStretchFactor(1, 2)
+        left = QVBoxLayout()
+        left.setSpacing(10)
+        left.addLayout(header)
+        left.addWidget(self.left_split, 1)
+
+        self.side = QStackedWidget()
+        self.side.addWidget(self.panel)
+        self.side.setFixedWidth(SIDE_WIDTH)
+        row = QHBoxLayout(self.viewer)
+        row.setContentsMargins(16, 10, 16, 16)
+        row.setSpacing(16)
+        row.addLayout(left, 1)
+        row.addWidget(self.side)
+
+        self.transport.playToggled.connect(self._toggle_play)
+        self.transport.stepRequested.connect(self._step)
+        self.transport.scrubbed.connect(self._scrub)
+        self.transport.speedRequested.connect(self._cycle_speed)
+
+    def set_details(self, on: bool) -> None:
+        """Details: the angle timeline (and, with the result cards, the settings panel)."""
+        if self.act_details.isChecked() != on:
+            self.act_details.setChecked(on)  # re-enters through toggled
+            return
+        self.timeline.setVisible(on)
+        if on:
+            total = max(1, self.left_split.height())
+            self.left_split.setSizes([round(total * 0.62), round(total * 0.38)])
+            if self._player is not None:
+                self.timeline.set_frame(self._player.frame)
 
     _KEY_COMMANDS: dict[tuple[int, bool], str] = {
         (int(Qt.Key.Key_Space), False): "toggle",
@@ -199,6 +290,7 @@ class MainWindow(QMainWindow):
         )
         self.act_fullscreen.triggered.connect(self.toggle_full_screen)
         window_menu.addAction(self.act_fullscreen)
+        window_menu.addAction(self.act_details)
 
         pb = self.menuBar().addMenu("&Playback")
 
@@ -217,6 +309,7 @@ class MainWindow(QMainWindow):
         self.act_next10 = add("Forward 10 frames", ["Shift+Right"], lambda: self._step(10))
         self.act_first = add("First frame", ["Home", "Ctrl+Left"], lambda: self._seek(0))
         self.act_last = add("Last frame", ["End", "Ctrl+Right"], self._seek_last)
+        self.act_speed = add("Playback speed (1×, ½×, ¼×)", ["S"], self._cycle_speed)
         pb.addSeparator()
         self.act_fit = add("Fit to window", ["F"], self.view.fit)
         self.act_mode = add("Toggle colour mode", ["C"], self._toggle_mode)
@@ -382,9 +475,17 @@ class MainWindow(QMainWindow):
         self._player = Player(session.n_frames, session.fps, self)
         self._player.frameChanged.connect(self._on_frame)
         self._player.playingChanged.connect(self._on_playing)
+        self._player.rateChanged.connect(self.transport.set_rate)
         self.view.set_session(session, source)
+        self.view.set_angle_names(session.default_angle_names())
+        self._show_clock = session.test_window is not None and (
+            session.primary_metric is not None and session.primary_metric.units == "s"
+        )
         self.timeline.set_session(session)
         self.panel.set_session(session)
+        self.transport.set_session(session)
+        self.result_title.setText(result_title(session))
+        self.result_subtitle.setText(result_subtitle(session))
         self.setWindowTitle(f"ptvision — {session.title}")
         self.stack.setCurrentWidget(self.viewer)
         self.view.setFocus()
@@ -407,6 +508,7 @@ class MainWindow(QMainWindow):
         self.view.set_session(None, None)
         self.timeline.set_session(None)
         self.panel.set_session(None)
+        self.transport.set_session(None)
         self._session = None
         self.act_report.setEnabled(False)
         self.setWindowTitle("ptvision")
@@ -450,16 +552,31 @@ class MainWindow(QMainWindow):
         if s is None:
             return
         self.view.show_frame(t)
-        self.timeline.set_frame(t)
+        if self.timeline.isVisible():
+            self.timeline.set_frame(t)
+        self.transport.set_frame(t)
         values = s.angle_readout(t)
         self.panel.set_readout(values)
-        rep = s.rep_at(t)
-        self.view.set_badge(f"Rep {rep[0]} / {rep[1]}" if rep else None)
+        self.view.set_angles(values)
+        self.view.set_badge(s.rep_label(t))
+        clock = s.test_clock(t) if self._show_clock else None
+        done = s.test_window is not None and t >= s.test_window[1]
+        self.view.set_clock(clock, done=done)
         readout = "  ".join(f"{k.replace('_', ' ')} {v:.0f}°" for k, v in values.items())
         self.statusBar().showMessage(f"frame {t}/{s.n_frames - 1}   {t / s.fps:.2f} s   {readout}")
 
     def _on_playing(self, playing: bool) -> None:
         self.act_play.setText("Pause" if playing else "Play")
+        self.transport.set_playing(playing)
+
+    def _scrub(self, t: int) -> None:
+        if self._player is not None:
+            self._player.pause()
+            self._player.seek(int(t))
+
+    def _cycle_speed(self) -> None:
+        if self._player is not None:
+            self._player.cycle_rate()
 
     def _seek(self, t: int) -> None:
         if self._player is not None:

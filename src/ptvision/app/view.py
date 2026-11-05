@@ -1,11 +1,21 @@
-"""Video frame + skeleton overlay in a zoomable view"""
+"""Video frame + skeleton overlay in a zoomable view, with the rep, test clock and joint angles
+laid over its corners (the iPhone result screen's overlays)."""
 
 from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QPainter, QPixmap, QResizeEvent, QWheelEvent
-from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QLabel
+from PySide6.QtWidgets import (
+    QFrame,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ptvision.app import theme
 from ptvision.app.overlay import SkeletonItem
@@ -24,6 +34,51 @@ _NAV_KEYS = {
     Qt.Key.Key_PageDown,
 }
 
+CHIP_NAMES = {"knee_flexion": "Knee", "hip_flexion": "Hip", "trunk_lean": "Trunk"}
+_MARGIN = 14
+
+
+class AngleChips(QWidget):
+    """The joint angles at the current frame, one small dark chip per angle."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._lay = QVBoxLayout(self)
+        self._lay.setContentsMargins(0, 0, 0, 0)
+        self._lay.setSpacing(6)
+        self.values: dict[str, QLabel] = {}
+
+    def set_names(self, names: list[str]) -> None:
+        while self._lay.count():
+            item = self._lay.takeAt(0)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.deleteLater()
+        self.values = {}
+        for name in names:
+            chip = QFrame()
+            chip.setObjectName("chip")
+            hl = QHBoxLayout(chip)
+            hl.setContentsMargins(12, 4, 12, 4)
+            hl.setSpacing(10)
+            title = QLabel(CHIP_NAMES.get(name, name.replace("_", " ").capitalize()))
+            theme.set_role(title, "secondary")
+            value = QLabel("–")
+            value.setFont(theme.number_font(value.font(), 22))
+            value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            value.setMinimumWidth(value.fontMetrics().horizontalAdvance("188°"))
+            hl.addWidget(title)
+            hl.addStretch(1)
+            hl.addWidget(value)
+            self._lay.addWidget(chip)
+            self.values[name] = value
+        self.adjustSize()
+
+    def set_values(self, values: dict[str, float]) -> None:
+        for name, label in self.values.items():
+            v = values.get(name)
+            label.setText(f"{v:.0f}°" if v is not None else "–")
+
 
 class VideoView(QGraphicsView):
     frameRendered = Signal(int)
@@ -37,14 +92,16 @@ class VideoView(QGraphicsView):
         self._scene.addItem(self._pix_item)
         self.skeleton = SkeletonItem()
         self._scene.addItem(self.skeleton)
-        # rep badge
+        # overlays: rep and phase, the test clock (top left), joint angles (top right)
         self.badge = QLabel(self.viewport())
-        self.badge.setStyleSheet(
-            "background: rgba(20, 22, 26, 170); color: white; font-size: 18px; font-weight: 600;"
-            " padding: 4px 10px; border-radius: 8px;"
-        )
-        self.badge.move(12, 12)
+        self.badge.setObjectName("badge")
         self.badge.hide()
+        self.clock = QLabel(self.viewport())
+        self.clock.setObjectName("clock")
+        self.clock.setFont(theme.number_font(self.clock.font(), 34))
+        self.clock.hide()
+        self.chips = AngleChips(self.viewport())
+        self.chips.hide()
         self._session: TrialSession | None = None
         self._source: FrameSource | None = None
         self._frame: np.ndarray | None = None  # keep the array alive while displayed
@@ -74,6 +131,9 @@ class VideoView(QGraphicsView):
             self.fit()
         else:
             self._pix_item.setPixmap(QPixmap())
+            self.set_badge(None)
+            self.set_clock(None)
+            self.set_angle_names([])
 
     def set_badge(self, text: str | None) -> None:
         if text:
@@ -83,6 +143,40 @@ class VideoView(QGraphicsView):
             self.badge.raise_()
         else:
             self.badge.hide()
+        self._place_overlays()
+
+    def set_clock(self, seconds: float | None, *, done: bool = False) -> None:
+        """The stopwatch for the timed test; accent once it has stopped at the final time."""
+        if seconds is None:
+            self.clock.hide()
+            return
+        self.clock.setText(f"{seconds:.2f} s")
+        if bool(self.clock.property("done")) != done:
+            self.clock.setProperty("done", done)
+            theme.repolish(self.clock)
+        self.clock.adjustSize()
+        self.clock.show()
+        self.clock.raise_()
+        self._place_overlays()
+
+    def set_angle_names(self, names: list[str]) -> None:
+        self.chips.set_names(names)
+        self.chips.setVisible(bool(names))
+        self._place_overlays()
+
+    def set_angles(self, values: dict[str, float]) -> None:
+        self.chips.set_values(values)
+
+    def _place_overlays(self) -> None:
+        y = _MARGIN
+        self.badge.move(_MARGIN, y)
+        if self.badge.isVisible():
+            y += self.badge.height() + 8
+        self.clock.move(_MARGIN, y)
+        self.chips.adjustSize()
+        x = self.viewport().width() - self.chips.width() - _MARGIN
+        self.chips.move(max(_MARGIN, x), _MARGIN)
+        self.chips.raise_()
 
     def close_source(self) -> None:
         if self._source is not None:
@@ -130,6 +224,7 @@ class VideoView(QGraphicsView):
         super().resizeEvent(event)
         if not self._user_zoom:
             self.fit()
+        self._place_overlays()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._session is None:
